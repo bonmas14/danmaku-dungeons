@@ -197,7 +197,7 @@ int entry(int argc, char **argv) {
 
         // ---- rendering ---- //
 
-        reset_draw_frame(&draw_frame);
+        //reset_draw_frame(&draw_frame);
 
         float64 scale = max(0.01f, camera->camera_scale);
         draw_frame.view = m4_make_scale(v3(scale, scale, scale));
@@ -220,9 +220,8 @@ int entry(int argc, char **argv) {
             }
         }
 
-        draw_frame.projection = m4_make_orthographic_projection(window.pixel_width * -0.5, window.pixel_width * 0.5, window.pixel_height * -0.5, window.pixel_height * 0.5, -1, 10);
-
-        draw_frame.view = m4_make_scale(v3(1, 1, 1));
+        //draw_frame.projection = m4_make_orthographic_projection(window.pixel_width * -0.5, window.pixel_width * 0.5, window.pixel_height * -0.5, window.pixel_height * 0.5, -1, 10);
+        //draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
         //draw_text(font, STR("Ligma"), 48, v2(0, 0), v2(1, 1), COLOR_WHITE);
 
