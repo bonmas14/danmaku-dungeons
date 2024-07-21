@@ -6,6 +6,7 @@
 #define BULLET_01_SPEED 2.0f
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
+#define RESPAWN_POINT v2(0, -4)
 #define ENEMY_HEALTHS 20 // bosses are like 100 - 1000
 
 typedef enum entity_archetype_t { 
@@ -13,7 +14,6 @@ typedef enum entity_archetype_t {
     ENTITY_enemy,
     ENTITY_bullet, 
     ENTITY_player, 
-    ENTITY_camera, 
 } entity_archetype_t;
 
 typedef enum bullet_archetype_t {
@@ -21,11 +21,11 @@ typedef enum bullet_archetype_t {
     BULLET_enemy_01,
 } bullet_archetype_t;
 
-typedef enum entity_alive_state_t {
+typedef enum entity_state_t {
     ENT_STATE_none,
     ENT_STATE_dead,
     ENT_STATE_alive,
-} entity_alive_state_t;
+} entity_state_t;
 
 typedef enum sprite_id_t {
     SPRITE_error,
@@ -36,6 +36,13 @@ typedef enum sprite_id_t {
     SPRITE_MAX,
 } sprite_id_t;
 
+typedef enum game_state_t {
+    GAME_init,
+    GAME_menu,
+    GAME_editor,
+    GAME_scene,
+} game_state_t;
+
 typedef struct sprite_t {
     Gfx_Image* image;
     Vector2 size;
@@ -45,28 +52,30 @@ typedef struct entity_t {
     bool is_valid;
     bool is_visible;
 
-    entity_archetype_t entity_type;
-    bullet_archetype_t bullet_type;
-    entity_alive_state_t state;
-    sprite_t sprite;
-
     Vector2 position;
     Vector2 direction;
 
-    float32 radius;
-    int32_t healths;
+    entity_archetype_t entity_type;
+    bullet_archetype_t bullet_type;
+    entity_state_t state;
 
-    float64 timer; // gonna need this for bullets
+    int32_t healths;
+    float32 radius;
+
+    sprite_t sprite;
+
+    float64 timer; // gonna need this for bullets. but actually no, because we need to be without delta time here
 
     float64 movement_speed;
-    float64 camera_scale;
 } entity_t;
 
 typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
+    u64 frame_counter;
 } world_t;
 
 Gfx_Font* font = 0;
+Gfx_Image* load_screen = 0;
 world_t* world = 0;
 
 Range2f borders =  { 0 };
@@ -74,12 +83,12 @@ Range2f borders =  { 0 };
 sprite_t sprites[SPRITE_MAX];
 
 entity_t* player;
-entity_t* camera;
+entity_t* enemy;
 
+game_state_t program_state = GAME_init;
 float64 now_time = 0;
 float64 delta_time = 0;
 
-int32_t collision_checks = 0;
 
 sprite_t sprite_get(sprite_id_t id) {
     if (id >= SPRITE_MAX || id <= SPRITE_error) return sprites[SPRITE_error];
@@ -126,14 +135,6 @@ void entity_setup_enemy(entity_t* entity) {
     entity->radius = entity->sprite.size.x / 2;
 }
 
-void entity_setup_camera(entity_t* entity) {
-    entity->entity_type = ENTITY_camera;
-    entity->is_visible = false;
-    entity->state = ENT_STATE_none;
-    entity->camera_scale = CAMERA_SCALE;
-    entity->movement_speed = CAMERA_SPEED;
-}
-
 entity_t* entity_create(void) {
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         if (!world->entities[i].is_valid) {
@@ -145,6 +146,13 @@ entity_t* entity_create(void) {
     }
 
     return 0;
+}
+
+void entity_reset_all(void) {
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* ent = &(world->entities[i]);
+        memset(ent, 0, sizeof(entity_t));
+    }
 }
 
 void entity_clear_all_bullets(void) {
@@ -163,7 +171,6 @@ entity_t* check_collision_with_relevant_entities(entity_t* entity) {
     for (u32 i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t* bullet = &(world->entities[i]);
 
-        collision_checks++;
 
         if (!bullet->is_valid) continue;
 
@@ -208,7 +215,7 @@ void update_player(void) {
 
 
     if (is_key_down(KEY_SHIFT)) {
-        multiplier = 0.5f;
+        multiplier = 0.35f;
     } 
 
     input_axis = v2_normalize(input_axis);
@@ -223,7 +230,7 @@ void update_player(void) {
         player->healths -= 1;
         // bullet_collision->is_valid = false; 
         entity_clear_all_bullets(); 
-        player->position = v2(0, -5);
+        player->position = RESPAWN_POINT;
     }
 
     if (player->healths < 0) {
@@ -280,7 +287,7 @@ void update_enemy(entity_t* enemy) {
 
     // different patterns for different enemies. bosses are separate topic!
 
-    for (size_t i = 0; i <= count; i++) {
+    for (size_t i = 0; i < count; i++) {
         entity_t* bullet = entity_create();
         if (bullet == 0) break;
 
@@ -331,48 +338,95 @@ void update_bullets(void) {
     }
 }
 
-int entry(int argc, char **argv) {
-    window.title = STR("Danmaku dungeons");
-    window.scaled_width = 1280; // We need to set the scaled size if we want to handle system scaling (DPI)
-    window.scaled_height = 720; 
-    window.x = 200;
-    window.y = 90;
-    window.clear_color = hex_to_rgba(0x0f0f0fff);
 
-    borders = range2f_make(v2(-4, -5), v2(4, 5));
+void update_game_scene(void) {
+    update_bullets();
+    update_enemies();
+    update_player();
 
-    sprites[SPRITE_error] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"), get_heap_allocator()), .size = v2(1, 1) };
-    sprites[SPRITE_player] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };
-    sprites[SPRITE_enemy] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/enemies/enemy_01.png"), get_heap_allocator()), .size = v2(1, 1) };
-    sprites[SPRITE_bullet_01] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/bullets/bullet_01.png"), get_heap_allocator()), .size = v2(0.2, 0.2) };
+    reset_draw_frame(&draw_frame);
 
-    world = alloc(get_heap_allocator(), sizeof(world_t));
+    float64 scale = CAMERA_SCALE;
+    draw_frame.view = m4_make_scale(v3(scale, scale, scale));
+
+    draw_rect(borders.min, v2_mulf(borders.max, 2.0f), hex_to_rgba(0x7f7f7f3f));
 
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t *ent = &(world->entities[i]);
-        memset(ent, 0, sizeof(entity_t));
+        entity_t ent = world->entities[i];
+
+        if (!ent.is_valid) continue;
+        if (!ent.is_visible) continue;
+
+        Vector4 color = COLOR_WHITE;
+
+        if (ent.entity_type == ENTITY_bullet) {
+            switch (ent.bullet_type) {
+                case BULLET_player_01:
+                    color = hex_to_rgba(0xFFE1BF7F);
+                    break;
+                default:
+                    color = hex_to_rgba(0xFFFFFFFF);
+                    break;
+            }
+        }
+
+        Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
+        draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
     }
 
-    player = entity_create();
-    camera = entity_create();
-    entity_t* enemy = entity_create();
+    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
+    draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
-    entity_setup_player(player);
-    entity_setup_camera(camera);
-    entity_setup_enemy(enemy);
+    draw_text(font, tprintf("player health\t: %00d", player->healths), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("enemy health\t: %00d", enemy->healths), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -90), v2(1, 1), COLOR_WHITE);
+}
 
-    player->position = v2(0, 0);
-    camera->position = v2(0, 0);
-    enemy->position  = v2(0, 0);
+void update_loading_screen(void) {
+    reset_draw_frame(&draw_frame);
+    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); 
+    draw_frame.view = m4_make_scale(v3(1, 1, 1));
+
+    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, 0, window.pixel_height, -1, 10); 
+    draw_image(load_screen, v2(0,0), v2(window.pixel_width, window.pixel_height), COLOR_WHITE);
+    //draw_text(font, tprintf("loading..."), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
+}
+
+void game_early_init(void) {
+    window.title = STR("Danmaku dungeons");
+    window.x = 200;
+    window.y = 90;
+
+    window.scaled_width = 1280; 
+    window.scaled_height = 720; 
+    window.enable_vsync = true;
+
+    window.clear_color = hex_to_rgba(0x0f0f0fff);
+    borders = range2f_make(v2(-4, -5), v2(4, 5));
+    load_screen = load_image_from_disk(STR("res/graphics/loading.png"), get_heap_allocator());
+}
+
+void game_late_init(void) {
+    world = alloc(get_heap_allocator(), sizeof(world_t));
+    world->frame_counter = 0;
 
     font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
 
-    circle_t circ = { 0 };
+    sprites[SPRITE_error]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"),             get_heap_allocator()), .size = v2(1, 1) };
+    sprites[SPRITE_player]    = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };
+    sprites[SPRITE_enemy]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/enemies/enemy_01.png"),  get_heap_allocator()), .size = v2(1, 1) };
+    sprites[SPRITE_bullet_01] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/bullets/bullet_01.png"), get_heap_allocator()), .size = v2(0.2, 0.2) };
+
+    //os_sleep(1000); // loading kinda works
+}
+
+int entry(int argc, char **argv) {
+    game_early_init();
+
+
     float64 prew_time = os_get_current_time_in_seconds();
-    enemy->timer = prew_time;
 
     while (!window.should_close) {
-        collision_checks = 0;
         reset_temporary_storage();
 
         now_time = os_get_current_time_in_seconds();
@@ -380,59 +434,37 @@ int entry(int argc, char **argv) {
 
         if (is_key_just_pressed(KEY_ESCAPE)) window.should_close = true;
 
-        update_bullets();
-        update_enemies();
-        update_player();
-
-        // ---- rendering ---- //
-
-        reset_draw_frame(&draw_frame);
-
-        float64 scale = max(0.01f, camera->camera_scale);
-        draw_frame.view = m4_make_scale(v3(scale, scale, scale));
-        draw_frame.view = m4_translate(draw_frame.view, v3(camera->position.x, camera->position.y, 1));
-
-        draw_rect(borders.min, v2_mulf(borders.max, 2.0f), hex_to_rgba(0x7f7f7f3f));
-
-        for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-            entity_t ent = world->entities[i];
-
-            if (!ent.is_valid) continue;
-            if (!ent.is_visible) continue;
-
-            Vector4 color = COLOR_WHITE;
-
-            Matrix4 xform = m4_scalar(1.0);
-            Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
-            xform = m4_translate(xform, v3(offset.x, offset.y, 0));
-            xform = m4_translate(xform, v3(ent.position.x, ent.position.y, 0));
-
-            if (ent.entity_type == ENTITY_bullet) {
-                switch (ent.bullet_type) {
-                    case BULLET_player_01:
-                        color = hex_to_rgba(0xFFE1BF7F);
-                        break;
-                    default:
-                        color = COLOR_WHITE;
-                        break;
-                }
-            }
-
-            draw_image_xform(ent.sprite.image, xform, ent.sprite.size, color);
+        switch (program_state) {
+            case GAME_init: 
+                update_loading_screen(); 
+                break;
+            case GAME_menu:
+                break;
+            case GAME_editor: 
+                break;
+            case GAME_scene: 
+                update_game_scene();
+                world->frame_counter++;
+                break;
         }
-
-        draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
-        
-        draw_frame.view = m4_make_scale(v3(1, 1, 1));
-
-        draw_text(font, tprintf("player health\t: %00d", player->healths), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
-        draw_text(font, tprintf("enemy health\t: %00d", enemy->healths), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
-        draw_text(font, tprintf("collision checks\t: %00d", collision_checks), 48, v2(0, -90), v2(1, 1), COLOR_WHITE);
-        draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -120), v2(1, 1), COLOR_WHITE);
 
         os_update(); 
         gfx_update();
 
+        if (program_state == GAME_init) { 
+            game_late_init(); // we actually need to create all this stuff before starting from menu to scene
+            player = entity_create();
+            enemy = entity_create();
+
+            entity_setup_player(player);
+            entity_setup_enemy(enemy);
+
+            player->position = v2(0, 0);
+            enemy->position  = v2(0, 0);
+            enemy->timer = now_time; 
+
+            program_state = GAME_scene;
+        } 
         prew_time = now_time;
     }
 
