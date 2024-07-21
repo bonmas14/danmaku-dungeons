@@ -26,5 +26,6 @@ float32 v2_sqr_dist(Vector2 a, Vector2 b) {
 }
 
 bool check_collision_circle_to_circle(circle_t a, circle_t b) {
+
     return v2_sqr_dist(a.position, b.position) < (a.radius * a.radius + b.radius * b.radius);
 }
