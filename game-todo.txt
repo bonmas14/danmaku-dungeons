@@ -1,0 +1,17 @@
+!! now its is not a procedural danmaku game !!
+!! dungeons now mean the story part of game !!
+!! maybe i'll even rename this game !!
+
+
+- paths for bots to go (linear lines through the screen)
+- scenes? so we can plan bots creation as in Touhou levels? 
+- go away from delta time, because we need consistency
+- power up consuption.
+- player power ups
+
+
+
+
+
+
+

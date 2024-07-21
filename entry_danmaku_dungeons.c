@@ -1,5 +1,5 @@
 #define MAX_ENTITY_COUNT 4096
-#define CAMERA_SCALE 10.0f
+#define CAMERA_SCALE 5.0f
 #define CAMERA_SPEED 1.0f
 #define PLAYER_SPEED 4.5f
 #define PLAYER_BULLET_SPEED 20.0f
@@ -68,6 +68,8 @@ typedef struct world_t {
 
 Gfx_Font* font = 0;
 world_t* world = 0;
+
+Range2f borders =  { 0 };
 
 sprite_t sprites[SPRITE_MAX];
 
@@ -221,6 +223,7 @@ void update_player(void) {
         player->healths -= 1;
         // bullet_collision->is_valid = false; 
         entity_clear_all_bullets(); 
+        player->position = v2(0, -5);
     }
 
     if (player->healths < 0) {
@@ -263,7 +266,6 @@ void update_enemy(entity_t* enemy) {
 
     entity_t* bullet_collision = check_collision_with_relevant_entities(enemy);
 
-
     if (bullet_collision != 0) {
         enemy->healths -= 1;
         bullet_collision->is_valid = false; 
@@ -274,7 +276,7 @@ void update_enemy(entity_t* enemy) {
 
     enemy->timer = now_time;
 
-    size_t count = 20;
+    size_t count = 5;
 
     // different patterns for different enemies. bosses are separate topic!
 
@@ -311,7 +313,7 @@ void update_bullets(void) {
         if (!bullet->is_valid) continue;
         if (!(bullet->entity_type == ENTITY_bullet)) continue;
 
-        if (bullet->timer > 10.0) { // just for tests, it should break as soon as it go over screen
+        if (!range2f_contains(borders, bullet->position)) {
             bullet->is_valid = false;
             continue;
         } 
@@ -337,6 +339,8 @@ int entry(int argc, char **argv) {
     window.y = 90;
     window.clear_color = hex_to_rgba(0x0f0f0fff);
 
+    borders = range2f_make(v2(-4, -5), v2(4, 5));
+
     sprites[SPRITE_error] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"), get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_player] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_enemy] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/enemies/enemy_01.png"), get_heap_allocator()), .size = v2(1, 1) };
@@ -359,12 +363,13 @@ int entry(int argc, char **argv) {
 
     player->position = v2(0, 0);
     camera->position = v2(0, 0);
-    enemy->position  = v2(2, 2);
+    enemy->position  = v2(0, 0);
 
     font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
 
     circle_t circ = { 0 };
     float64 prew_time = os_get_current_time_in_seconds();
+    enemy->timer = prew_time;
 
     while (!window.should_close) {
         collision_checks = 0;
@@ -386,6 +391,8 @@ int entry(int argc, char **argv) {
         float64 scale = max(0.01f, camera->camera_scale);
         draw_frame.view = m4_make_scale(v3(scale, scale, scale));
         draw_frame.view = m4_translate(draw_frame.view, v3(camera->position.x, camera->position.y, 1));
+
+        draw_rect(borders.min, v2_mulf(borders.max, 2.0f), hex_to_rgba(0x7f7f7f3f));
 
         for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
             entity_t ent = world->entities[i];
@@ -415,6 +422,7 @@ int entry(int argc, char **argv) {
         }
 
         draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
+        
         draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
         draw_text(font, tprintf("player health\t: %00d", player->healths), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
