@@ -54,7 +54,6 @@ typedef struct sprite_t {
 
 typedef struct entity_t {
     bool is_valid;
-    bool is_visible;
 
     Vector2 position;
     Vector2 direction;
@@ -76,17 +75,19 @@ typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
 } world_t;
 
-Gfx_Font* font = 0;
 Gfx_Image* load_screen = 0;
+Gfx_Font* font = 0;
 
-world_t* world = 0;
+Audio_Player* impact_player;
 
 sprite_t sprites[SPRITE_MAX];
 
+world_t* world = 0;
+
 game_state_t program_state = GAME_init;
+
 float64 now_time = 0;
 float64 delta_time = 0;
-
 
 entity_t* player_entity;
 
@@ -94,7 +95,6 @@ struct {
     Vector2 position;
     float32 scale;
 } camera;
-
 
 sprite_t sprite_get(sprite_id_t id) {
     if (id >= SPRITE_MAX || id <= SPRITE_error) return sprites[SPRITE_error];
@@ -104,7 +104,6 @@ sprite_t sprite_get(sprite_id_t id) {
 
 void entity_setup_player(entity_t* entity) {
     entity->entity_type = ENTITY_player;
-    entity->is_visible = true;
     entity->movement_speed = PLAYER_SPEED;
     entity->sprite = sprite_get(SPRITE_player);
     entity->state = ENT_STATE_alive;
@@ -115,7 +114,6 @@ void entity_setup_player(entity_t* entity) {
 void entity_setup_player_bullet(entity_t* entity) {
     entity->entity_type = ENTITY_bullet;
     entity->bullet_type = BULLET_player_01;
-    entity->is_visible = true;
     entity->movement_speed = PLAYER_BULLET_SPEED;
     entity->state = ENT_STATE_alive;
     entity->sprite = sprite_get(SPRITE_bullet_01);
@@ -125,7 +123,6 @@ void entity_setup_player_bullet(entity_t* entity) {
 void entity_setup_bullet_01(entity_t* entity) {
     entity->entity_type = ENTITY_bullet;
     entity->bullet_type = BULLET_enemy_01;
-    entity->is_visible = true;
     entity->movement_speed = BULLET_01_SPEED;
     entity->state = ENT_STATE_alive;
     entity->sprite = sprite_get(SPRITE_bullet_01);
@@ -134,7 +131,6 @@ void entity_setup_bullet_01(entity_t* entity) {
 
 void entity_setup_enemy(entity_t* entity) {
     entity->entity_type = ENTITY_enemy;
-    entity->is_visible = true;
     entity->healths = ENEMY_HEALTHS;
     entity->movement_speed = PLAYER_SPEED;
     entity->state = ENT_STATE_alive;
@@ -237,47 +233,41 @@ void player_shoot(entity_t* player) {
 }
 
 void update_player(void) {
-    Vector2 input_axis = v2(0, 0);
-    float32 multiplier = 1.0f;
+    if (player_entity->healths < 0) {
+        player_entity->is_valid = false;
+        return;
+    }
 
+    float32 multiplier = 1.0f;
+    if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
+
+    Vector2 input_axis = v2(0, 0);
     if (is_key_down('W')) input_axis.y += 1.0f;
     if (is_key_down('S')) input_axis.y -= 1.0f;
     if (is_key_down('A')) input_axis.x -= 1.0f;
     if (is_key_down('D')) input_axis.x += 1.0f;
-    if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
-
-    multiplier *= delta_time;
 
     input_axis = v2_normalize(input_axis);
-    input_axis = v2_mulf(input_axis, multiplier);
+    input_axis = v2_mulf(input_axis, multiplier * delta_time * player_entity->movement_speed);
 
-    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t* player = &(world->entities[i]);
+    player_entity->position = v2_add(player_entity->position, input_axis);
 
-        if (!player->is_valid) continue;
-        if (player->entity_type != ENTITY_player) continue;
+    entity_t* bullet_collision = check_collision_with_relevant_entities(player_entity);
 
-        if (player->healths < 0) {
-            player->is_valid = false;
-            break;
+    if (bullet_collision != 0) {
+        player_entity->healths -= 1;
+
+        if (audio_player_get_current_progression_factor(impact_player) >= .99) {
+            audio_player_set_progression_factor(impact_player, 0);
         }
 
-        player->position = v2_add(player->position, v2_mulf(input_axis, player->movement_speed));
-
-        entity_t* bullet_collision = check_collision_with_relevant_entities(player);
-
-        if (bullet_collision != 0) {
-            player->healths -= 1;
-            entity_clear_all_bullets(); 
-            player->position = RESPAWN_POINT;
-        }
-
-        if (is_key_down(KEY_SPACEBAR)) {
-            player_shoot(player);
-        }
+        entity_clear_all_bullets(); 
+        player_entity->position = RESPAWN_POINT;
     }
 
-
+    if (is_key_down(KEY_SPACEBAR)) {
+        player_shoot(player_entity);
+    }
 }
 
 void update_enemy_state(entity_t* enemy) {
@@ -289,6 +279,10 @@ void update_enemy_state(entity_t* enemy) {
     entity_t* bullet_collision = check_collision_with_relevant_entities(enemy);
 
     if (bullet_collision == 0) return;
+
+    if (audio_player_get_current_progression_factor(impact_player) >= .99) {
+        audio_player_set_progression_factor(impact_player, 0);
+    }
 
     enemy->healths -= 1;
     bullet_collision->is_valid = false; 
@@ -383,7 +377,6 @@ void update_game_scene(void) {
         entity_t ent = world->entities[i];
 
         if (!ent.is_valid) continue;
-        if (!ent.is_visible) continue;
 
         Vector4 color = COLOR_WHITE;
 
@@ -460,6 +453,16 @@ void game_late_init(void) {
     world = alloc(get_heap_allocator(), sizeof(world_t));
 
     font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
+
+    Audio_Source source = { 0 };
+    impact_player = audio_player_get_one();
+
+    audio_open_source_stream(&source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
+    audio_player_set_source(impact_player, source, false);
+    audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
+
+    impact_player->position = v3(0, 0, 0);
+    impact_player->release_when_done = false;
 
     sprites[SPRITE_error]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"),             get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_player]    = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };

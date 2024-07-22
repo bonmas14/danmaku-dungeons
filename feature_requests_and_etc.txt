@@ -1,0 +1,12 @@
+
+
+
+what is progression factor mean in audio.c?
+
+
+
+Feature requests:
+* playback speed for audio players
+    by: resampling
+    to: pitch
+* audio_reset_progression
