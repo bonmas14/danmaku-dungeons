@@ -3,11 +3,10 @@
 #define CAMERA_SCALE 5.0f
 #define CAMERA_SPEED 1.0f
 #define PLAYER_SPEED 4.5f
-#define PLAYER_BULLET_SPEED 10.0f
-#define BULLET_01_SPEED 2.0f
+#define PLAYER_BULLET_SPEED 20.0f
+#define BULLET_01_SPEED 1.0f
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
-#define TIME_INTERVAL (1.0 / 60.0)
 
 #define RESPAWN_POINT v2(0, -4)
 // bosses are like 100 - 1000
@@ -15,6 +14,7 @@
 
 typedef enum entity_archetype_t { 
     ENTITY_null,
+    ENTITY_camera,
     ENTITY_enemy,
     ENTITY_bullet, 
     ENTITY_player, 
@@ -47,14 +47,6 @@ typedef enum game_state_t {
     GAME_scene,
 } game_state_t;
 
-typedef enum frame_archetype_t {
-    FRAME_null,
-    FRAME_entity_spawn,
-    FRAME_entity_move,
-    FRAME_entity_shoot,
-    FRAME_entity_destroy,
-} frame_archetype_t;
-
 typedef struct sprite_t {
     Gfx_Image* image;
     Vector2 size;
@@ -76,26 +68,9 @@ typedef struct entity_t {
 
     sprite_t sprite;
 
-    float64 timer; // gonna need this for bullets. but actually no, because we need to be without delta time here
-
-    float64 movement_speed;
+    float64 timer; 
+    float32 movement_speed;
 } entity_t;
-
-
-typedef struct frame_t {
-    u64 time;
-    frame_archetype_t type;
-    u32 entity_id;
-
-    Vector2 position;
-} frame_t;
-
-typedef struct scene_t {
-    u64 current_frame;
-    u64 frame_index;
-    u64 frame_count;
-    frame_t* frames;
-} scene_t;
 
 typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
@@ -104,16 +79,21 @@ typedef struct world_t {
 Gfx_Font* font = 0;
 Gfx_Image* load_screen = 0;
 
-scene_t current_scene;
 world_t* world = 0;
-
-Range2f borders =  { 0 };
 
 sprite_t sprites[SPRITE_MAX];
 
 game_state_t program_state = GAME_init;
 float64 now_time = 0;
 float64 delta_time = 0;
+
+
+entity_t* player_entity;
+
+struct {
+    Vector2 position;
+    float32 scale;
+} camera;
 
 
 sprite_t sprite_get(sprite_id_t id) {
@@ -231,6 +211,10 @@ void player_shoot(entity_t* player) {
 
         size_t count = 3; // defined by player power up
 
+        Vector2 position = screen_to_world(v2(input_frame.mouse_x, input_frame.mouse_y), v2(window.width, window.height), draw_frame);
+
+        position = v2_sub(player->position, position);
+
         float32 shoot_angle = PI32 / 16.0; // player concentration
 
         for (size_t i = 0; i < count; i++) {
@@ -242,7 +226,7 @@ void player_shoot(entity_t* player) {
             bullet->position = player->position;
 
             float32 normalized = (float32)i / (float32)(count - 1);
-            float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2);
+            float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2) + atan2f(position.y, position.x) + PI32 / 2;
 
             float32 y = sinf(angle);
             float32 x = cosf(angle);
@@ -262,7 +246,7 @@ void update_player(void) {
     if (is_key_down('D')) input_axis.x += 1.0f;
     if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
 
-    multiplier *= TIME_INTERVAL;
+    multiplier *= delta_time;
 
     input_axis = v2_normalize(input_axis);
     input_axis = v2_mulf(input_axis, multiplier);
@@ -320,6 +304,34 @@ void update_enemies(void) {
 
         if (!enemy->is_valid) continue;
 
+
+        if ((enemy->timer + SHOOT_INTERVAL * 8) < now_time) {
+            enemy->timer = now_time;
+
+            size_t count = get_random_int_in_range(2, 4);
+
+            Vector2 position = v2_sub(enemy->position, player_entity->position);
+
+            float32 shoot_angle = PI32 / 4.0;  
+
+            for (size_t i = 0; i < count; i++) {
+                entity_t* bullet = entity_create();
+
+                if (bullet == 0) break;
+
+                entity_setup_bullet_01(bullet);
+                bullet->position = enemy->position;
+
+                float32 normalized = (float32)i / (float32)(count - 1);
+                float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2) + atan2f(position.y, position.x) + PI32 / 2;
+
+                float32 y = sinf(angle);
+                float32 x = cosf(angle);
+
+                bullet->direction = v2(x, y);
+            }
+        }
+
         // move & shoot here!
     }
 }
@@ -331,17 +343,17 @@ void update_bullets(void) {
         if (!bullet->is_valid) continue;
         if (!(bullet->entity_type == ENTITY_bullet)) continue;
 
-        if (!range2f_contains(borders, bullet->position)) {
+        if (bullet->timer > 10.0) {
             bullet->is_valid = false;
             continue;
-        } 
+        }
 
         // each bullet has its unique movement pattern, but not right now as you see
         switch (bullet->bullet_type) { 
             case BULLET_enemy_01:
             case BULLET_player_01:
-                bullet->position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * TIME_INTERVAL));
-                bullet->timer += TIME_INTERVAL;
+                bullet->position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * delta_time));
+                bullet->timer += delta_time;
                 break;
             default: 
                 break;
@@ -351,16 +363,21 @@ void update_bullets(void) {
 
 
 void update_game_scene(void) {
+    reset_draw_frame(&draw_frame);
+
+    Vector2 target_pos = player_entity->position;
+    animate_v2_to_target(&camera.position, target_pos, delta_time, 30.0f);
+
+    float64 scale = camera.scale;
+    
+    //camera.position = player_entity->position;
+
+    draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
+    draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
+
     update_bullets();
     update_enemies();
     update_player();
-
-    reset_draw_frame(&draw_frame);
-
-    float64 scale = CAMERA_SCALE;
-    draw_frame.view = m4_make_scale(v3(scale, scale, scale));
-
-    draw_rect(borders.min, v2_mulf(borders.max, 2.0f), hex_to_rgba(0x7f7f7f3f));
 
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t ent = world->entities[i];
@@ -404,7 +421,6 @@ void update_game_scene(void) {
 
         if (ent.entity_type == ENTITY_player) {
             draw_text(font, tprintf("player health\t: %00d", ent.healths), 48, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
-
         }
 
         if (ent.entity_type == ENTITY_enemy) {
@@ -422,7 +438,6 @@ void update_loading_screen(void) {
 
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, 0, window.pixel_height, -1, 10); 
     draw_image(load_screen, v2(0,0), v2(window.pixel_width, window.pixel_height), COLOR_WHITE);
-    //draw_text(font, tprintf("loading..."), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
 }
 
 void game_early_init(void) {
@@ -432,18 +447,17 @@ void game_early_init(void) {
 
     window.scaled_width = 1280; 
     window.scaled_height = 720; 
-    window.enable_vsync = true;
+    //window.enable_vsync = true;
 
     window.clear_color = hex_to_rgba(0x0f0f0fff);
-    borders = range2f_make(v2(-4, -5), v2(4, 5));
+
+    camera.scale = CAMERA_SCALE;
+
     load_screen = load_image_from_disk(STR("res/graphics/loading.png"), get_heap_allocator());
 }
 
 void game_late_init(void) {
     world = alloc(get_heap_allocator(), sizeof(world_t));
-    current_scene.frames = alloc(get_heap_allocator(), sizeof(frame_t) * MAX_FRAME_COUNT);
-
-    current_scene.frame_count = 5;
 
     font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
 
@@ -485,17 +499,18 @@ int entry(int argc, char **argv) {
         gfx_update();
 
         if (program_state == GAME_init) { 
-            game_late_init(); // we actually need to create all this stuff before starting from menu to scene
+            game_late_init(); 
 
-            entity_t* player = entity_create();
-            entity_t* enemy = entity_create();
-
-            entity_setup_player(player);
-            entity_setup_enemy(enemy);
-
-            player->position = v2(0, 0);
-            enemy->position  = v2(0, 0);
-            enemy->timer = now_time; 
+            player_entity = entity_create();
+            entity_setup_player(player_entity);
+            player_entity->position = v2(0, 0);
+        
+            for (size_t i = 0; i < 10; i++) {
+                entity_t* enemy = entity_create();
+                entity_setup_enemy(enemy);
+                enemy->position  = v2(get_random_float32_in_range(-10, 10), get_random_float32_in_range(-10, 10));
+                enemy->timer = now_time;
+            }
 
             program_state = GAME_scene;
         } 
