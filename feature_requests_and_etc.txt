@@ -1,12 +1,11 @@
 
 
-
-what is progression factor mean in audio.c?
-
-
-
 Feature requests:
 * playback speed for audio players
     by: resampling
     to: pitch
 * audio_reset_progression
+
+* audio_is_finished (progression == 1)
+    but not a new state in player, because its very neat 
+    to just reset progression and it plays
