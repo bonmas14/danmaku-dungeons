@@ -1,16 +1,20 @@
 #define MAX_ENTITY_COUNT 4096
+#define MAX_FRAME_COUNT (1 << 16)
 #define CAMERA_SCALE 5.0f
 #define CAMERA_SPEED 1.0f
 #define PLAYER_SPEED 4.5f
-#define PLAYER_BULLET_SPEED 20.0f
+#define PLAYER_BULLET_SPEED 10.0f
 #define BULLET_01_SPEED 2.0f
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
+#define TIME_INTERVAL (1.0 / 60.0)
+
 #define RESPAWN_POINT v2(0, -4)
-#define ENEMY_HEALTHS 20 // bosses are like 100 - 1000
+// bosses are like 100 - 1000
+#define ENEMY_HEALTHS 20
 
 typedef enum entity_archetype_t { 
-    ENTITY_nil,
+    ENTITY_null,
     ENTITY_enemy,
     ENTITY_bullet, 
     ENTITY_player, 
@@ -43,6 +47,14 @@ typedef enum game_state_t {
     GAME_scene,
 } game_state_t;
 
+typedef enum frame_archetype_t {
+    FRAME_null,
+    FRAME_entity_spawn,
+    FRAME_entity_move,
+    FRAME_entity_shoot,
+    FRAME_entity_destroy,
+} frame_archetype_t;
+
 typedef struct sprite_t {
     Gfx_Image* image;
     Vector2 size;
@@ -69,21 +81,35 @@ typedef struct entity_t {
     float64 movement_speed;
 } entity_t;
 
+
+typedef struct frame_t {
+    u64 time;
+    frame_archetype_t type;
+    u32 entity_id;
+
+    Vector2 position;
+} frame_t;
+
+typedef struct scene_t {
+    u64 current_frame;
+    u64 frame_index;
+    u64 frame_count;
+    frame_t* frames;
+} scene_t;
+
 typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
-    u64 frame_counter;
 } world_t;
 
 Gfx_Font* font = 0;
 Gfx_Image* load_screen = 0;
+
+scene_t current_scene;
 world_t* world = 0;
 
 Range2f borders =  { 0 };
 
 sprite_t sprites[SPRITE_MAX];
-
-entity_t* player;
-entity_t* enemy;
 
 game_state_t program_state = GAME_init;
 float64 now_time = 0;
@@ -115,6 +141,7 @@ void entity_setup_player_bullet(entity_t* entity) {
     entity->sprite = sprite_get(SPRITE_bullet_01);
     entity->radius = entity->sprite.size.x / 2;
 }
+
 void entity_setup_bullet_01(entity_t* entity) {
     entity->entity_type = ENTITY_bullet;
     entity->bullet_type = BULLET_enemy_01;
@@ -196,76 +223,80 @@ entity_t* check_collision_with_relevant_entities(entity_t* entity) {
     }
 
     return 0;
-
 }
 
-void update_player(void) {
-    Vector2 input_axis = v2(0, 0);
+void player_shoot(entity_t* player) {
+    if ((player->timer + SHOOT_INTERVAL) < now_time) {
+        player->timer = now_time;
 
-    float32 multiplier = 1.0f;
+        size_t count = 3; // defined by player power up
 
-    if (is_key_down('W'))
-        input_axis.y += 1.0f;
-    if (is_key_down('S'))
-        input_axis.y -= 1.0f;
-    if (is_key_down('A'))
-        input_axis.x -= 1.0f;
-    if (is_key_down('D'))
-        input_axis.x += 1.0f;
+        float32 shoot_angle = PI32 / 16.0; // player concentration
 
+        for (size_t i = 0; i < count; i++) {
+            entity_t* bullet = entity_create();
 
-    if (is_key_down(KEY_SHIFT)) {
-        multiplier = 0.35f;
-    } 
+            if (bullet == 0) break;
 
-    input_axis = v2_normalize(input_axis);
+            entity_setup_player_bullet(bullet);
+            bullet->position = player->position;
 
-    input_axis = v2_mulf(input_axis, delta_time * multiplier * player->movement_speed);
+            float32 normalized = (float32)i / (float32)(count - 1);
+            float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2);
 
-    player->position = v2_add(player->position, input_axis);
+            float32 y = sinf(angle);
+            float32 x = cosf(angle);
 
-    entity_t* bullet_collision = check_collision_with_relevant_entities(player);
-
-    if (bullet_collision != 0) {
-        player->healths -= 1;
-        // bullet_collision->is_valid = false; 
-        entity_clear_all_bullets(); 
-        player->position = RESPAWN_POINT;
-    }
-
-    if (player->healths < 0) {
-        player->is_valid = false;
-        return;
-    }
-
-    if (is_key_down(KEY_SPACEBAR)) {
-        if ((player->timer + SHOOT_INTERVAL) < now_time) {
-            player->timer = now_time;
-
-            size_t count = 3;
-
-            float32 shoot_angle = PI32 / 16.0;
-            for (size_t i = 0; i < count; i++) {
-                entity_t* bullet = entity_create();
-
-                if (bullet == 0) break;
-
-                entity_setup_player_bullet(bullet);
-                bullet->position = player->position;
-
-                float32 normalized = (float32)i / (float32)(count - 1);
-                float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2);
-
-                float32 y = sinf(angle);
-                float32 x = cosf(angle);
-
-                bullet->direction = v2(x, y);
-            }
+            bullet->direction = v2(x, y);
         }
     }
 }
 
-void update_enemy(entity_t* enemy) {
+void update_player(void) {
+    Vector2 input_axis = v2(0, 0);
+    float32 multiplier = 1.0f;
+
+    if (is_key_down('W')) input_axis.y += 1.0f;
+    if (is_key_down('S')) input_axis.y -= 1.0f;
+    if (is_key_down('A')) input_axis.x -= 1.0f;
+    if (is_key_down('D')) input_axis.x += 1.0f;
+    if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
+
+    multiplier *= TIME_INTERVAL;
+
+    input_axis = v2_normalize(input_axis);
+    input_axis = v2_mulf(input_axis, multiplier);
+
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* player = &(world->entities[i]);
+
+        if (!player->is_valid) continue;
+        if (player->entity_type != ENTITY_player) continue;
+
+        if (player->healths < 0) {
+            player->is_valid = false;
+            break;
+        }
+
+        player->position = v2_add(player->position, v2_mulf(input_axis, player->movement_speed));
+
+        entity_t* bullet_collision = check_collision_with_relevant_entities(player);
+
+        if (bullet_collision != 0) {
+            player->healths -= 1;
+            entity_clear_all_bullets(); 
+            player->position = RESPAWN_POINT;
+        }
+
+        if (is_key_down(KEY_SPACEBAR)) {
+            player_shoot(player);
+        }
+    }
+
+
+}
+
+void update_enemy_state(entity_t* enemy) {
     if (enemy->healths < 0) {
         enemy->is_valid = false;
         return;
@@ -273,34 +304,10 @@ void update_enemy(entity_t* enemy) {
 
     entity_t* bullet_collision = check_collision_with_relevant_entities(enemy);
 
-    if (bullet_collision != 0) {
-        enemy->healths -= 1;
-        bullet_collision->is_valid = false; 
-        return;
-    }
+    if (bullet_collision == 0) return;
 
-    if ((enemy->timer + SHOOT_INTERVAL) > now_time) return;
-
-    enemy->timer = now_time;
-
-    size_t count = 5;
-
-    // different patterns for different enemies. bosses are separate topic!
-
-    for (size_t i = 0; i < count; i++) {
-        entity_t* bullet = entity_create();
-        if (bullet == 0) break;
-
-        entity_setup_bullet_01(bullet);
-        bullet->position = enemy->position;
-
-        float32 normalized = ((float32)i / (float32)count);
-
-        float32 y = sinf(normalized * 2.0 * PI32 + 1 * now_time);
-        float32 x = cosf(normalized * 2.0 * PI32 + 1 * now_time);
-
-        bullet->direction = v2(x, y);
-    }
+    enemy->healths -= 1;
+    bullet_collision->is_valid = false; 
 }
 
 void update_enemies(void) {
@@ -308,8 +315,12 @@ void update_enemies(void) {
         entity_t* enemy = &(world->entities[i]);
         if (!enemy->is_valid) continue;
         if (enemy->entity_type != ENTITY_enemy) continue;
+        // so here we will read our action list a do stuff
+        update_enemy_state(enemy);
 
-        update_enemy(enemy);
+        if (!enemy->is_valid) continue;
+
+        // move & shoot here!
     }
 }
 
@@ -329,8 +340,8 @@ void update_bullets(void) {
         switch (bullet->bullet_type) { 
             case BULLET_enemy_01:
             case BULLET_player_01:
-                bullet->position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * delta_time));
-                bullet->timer += delta_time;
+                bullet->position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * TIME_INTERVAL));
+                bullet->timer += TIME_INTERVAL;
                 break;
             default: 
                 break;
@@ -372,14 +383,36 @@ void update_game_scene(void) {
 
         Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
         draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
+        
+        // cheat
+        if (ent.entity_type == ENTITY_player) {
+            Vector2 size = v2_mulf(v2(ent.radius, ent.radius), 2.0f);
+            offset = v2_mulf(size, -0.5f);
+            draw_circle(v2_add(ent.position, offset), size, hex_to_rgba(0xFFFFFF7F)); 
+        }
     }
 
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
-    draw_text(font, tprintf("player health\t: %00d", player->healths), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("enemy health\t: %00d", enemy->healths), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -90), v2(1, 1), COLOR_WHITE);
+
+    int32_t offset_counter = 2;
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t ent = world->entities[i];
+
+        if (!ent.is_valid) continue;
+
+        if (ent.entity_type == ENTITY_player) {
+            draw_text(font, tprintf("player health\t: %00d", ent.healths), 48, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
+
+        }
+
+        if (ent.entity_type == ENTITY_enemy) {
+            draw_text(font, tprintf("enemy health\t: %00d", ent.healths), 48, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
+        }
+
+    }
+    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
 }
 
 void update_loading_screen(void) {
@@ -408,7 +441,9 @@ void game_early_init(void) {
 
 void game_late_init(void) {
     world = alloc(get_heap_allocator(), sizeof(world_t));
-    world->frame_counter = 0;
+    current_scene.frames = alloc(get_heap_allocator(), sizeof(frame_t) * MAX_FRAME_COUNT);
+
+    current_scene.frame_count = 5;
 
     font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
 
@@ -422,7 +457,6 @@ void game_late_init(void) {
 
 int entry(int argc, char **argv) {
     game_early_init();
-
 
     float64 prew_time = os_get_current_time_in_seconds();
 
@@ -444,7 +478,6 @@ int entry(int argc, char **argv) {
                 break;
             case GAME_scene: 
                 update_game_scene();
-                world->frame_counter++;
                 break;
         }
 
@@ -453,8 +486,9 @@ int entry(int argc, char **argv) {
 
         if (program_state == GAME_init) { 
             game_late_init(); // we actually need to create all this stuff before starting from menu to scene
-            player = entity_create();
-            enemy = entity_create();
+
+            entity_t* player = entity_create();
+            entity_t* enemy = entity_create();
 
             entity_setup_player(player);
             entity_setup_enemy(enemy);
