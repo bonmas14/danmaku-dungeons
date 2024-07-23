@@ -16,6 +16,7 @@ typedef enum entity_archetype_t {
     ENTITY_null,
     ENTITY_camera,
     ENTITY_enemy,
+    ENTITY_item,
     ENTITY_bullet, 
     ENTITY_player, 
 } entity_archetype_t;
@@ -24,6 +25,10 @@ typedef enum bullet_archetype_t {
     BULLET_player_01,
     BULLET_enemy_01,
 } bullet_archetype_t;
+
+typedef enum item_archetype_t {
+    ITEM_gold,
+} item_archetype_t;
 
 typedef enum entity_state_t {
     ENT_STATE_none,
@@ -34,6 +39,7 @@ typedef enum entity_state_t {
 typedef enum sprite_id_t {
     SPRITE_error,
     SPRITE_enemy,
+    SPRITE_gold,
     SPRITE_player,
     SPRITE_bullet_01,
     SPRITE_bullet_02,
@@ -58,9 +64,11 @@ typedef struct entity_t {
     Vector2 position;
     Vector2 direction;
 
+    entity_state_t state;
+
     entity_archetype_t entity_type;
     bullet_archetype_t bullet_type;
-    entity_state_t state;
+    item_archetype_t item_type;
 
     int32_t healths;
     float32 radius;
@@ -138,6 +146,16 @@ void entity_setup_enemy(entity_t* entity) {
     entity->radius = entity->sprite.size.x / 2;
 }
 
+void entity_setup_item(entity_t* entity) {
+    entity->entity_type = ENTITY_item;
+}
+
+void item_setup_gold(entity_t* entity) {
+    entity->item_type = ITEM_gold;
+    entity->sprite = sprite_get(SPRITE_gold);
+    entity->radius = entity->sprite.size.x / 2;
+}
+
 entity_t* entity_create(void) {
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         if (!world->entities[i].is_valid) {
@@ -168,33 +186,50 @@ void entity_clear_all_bullets(void) {
     }
 }
 
+bool check_collision_with_bullet(entity_t* bullet, entity_t* entity, circle_t bullet_circle, circle_t entity_circle) {
+    switch (bullet->bullet_type) {
+        case BULLET_player_01:
+            if (entity->entity_type != ENTITY_enemy) 
+                return false;
+
+            if (check_collision_circle_to_circle(bullet_circle, entity_circle))
+                return true;
+            break;
+        case BULLET_enemy_01:
+            if (entity->entity_type != ENTITY_player)
+                return false;
+
+            if (check_collision_circle_to_circle(bullet_circle, entity_circle))
+                return true;
+            break;
+    }
+
+    return false;
+}
+
 entity_t* check_collision_with_relevant_entities(entity_t* entity) {
-    circle_t entity_circle = circle(entity->radius, entity->position);
 
     for (u32 i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t* bullet = &(world->entities[i]);
+        entity_t* collide_with = &(world->entities[i]);
+
+        if (!collide_with->is_valid) continue;
 
 
-        if (!bullet->is_valid) continue;
+        if (collide_with->entity_type == ENTITY_bullet) {
+            circle_t entity_circle = circle(entity->radius, entity->position);
+            circle_t bullet_circle = circle(collide_with->radius, collide_with->position);
+            if (check_collision_with_bullet(collide_with, entity, bullet_circle, entity_circle))
+                return collide_with;
+        }
 
-        if (bullet->entity_type != ENTITY_bullet)
-            continue;
+        if (collide_with->entity_type == ENTITY_item) {
+            if (entity->entity_type != ENTITY_player) continue;
 
-        circle_t bullet_cirlce = circle(bullet->radius, bullet->position);
+            circle_t entity_circle = circle(entity->radius * 10.0f, entity->position);
+            circle_t item_circle   = circle(collide_with->radius, collide_with->position);
 
-        switch (bullet->bullet_type) {
-            case BULLET_player_01:
-                if (entity->entity_type != ENTITY_enemy) break;
-
-                if (check_collision_circle_to_circle(bullet_cirlce, entity_circle))
-                    return bullet;
-                break;
-            case BULLET_enemy_01:
-                if (entity->entity_type != ENTITY_player) break;
-
-                if (check_collision_circle_to_circle(bullet_cirlce, entity_circle))
-                    return bullet;
-                break;
+            if (check_collision_circle_to_circle(item_circle, entity_circle))
+                return collide_with;
         }
     }
 
@@ -238,6 +273,10 @@ void update_player(void) {
         return;
     }
 
+    if (is_key_down(KEY_SPACEBAR)) {
+        player_shoot(player_entity);
+    }
+
     float32 multiplier = 1.0f;
     if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
 
@@ -252,27 +291,39 @@ void update_player(void) {
 
     player_entity->position = v2_add(player_entity->position, input_axis);
 
-    entity_t* bullet_collision = check_collision_with_relevant_entities(player_entity);
+    entity_t* collision = check_collision_with_relevant_entities(player_entity);
 
-    if (bullet_collision != 0) {
-        player_entity->healths -= 1;
+    if (collision == 0) 
+        return;
+    switch (collision->entity_type) {
+        case ENTITY_bullet:
+            player_entity->healths -= 1;
 
-        if (audio_player_get_current_progression_factor(impact_player) >= .99) {
-            audio_player_set_progression_factor(impact_player, 0);
-        }
+            entity_clear_all_bullets(); 
+            player_entity->position = RESPAWN_POINT;
+            break;
+        case ENTITY_item:
+            // add item, play sound
+            { // audio_player_is_finished 
+                spinlock_acquire_or_wait(&impact_player->sample_lock);
+                assert(impact_player->frame_index <= impact_player->source.number_of_frames);
 
-        entity_clear_all_bullets(); 
-        player_entity->position = RESPAWN_POINT;
-    }
+                if (impact_player->frame_index == impact_player->source.number_of_frames)
+                    impact_player->frame_index = 0;
 
-    if (is_key_down(KEY_SPACEBAR)) {
-        player_shoot(player_entity);
+                spinlock_release(&impact_player->sample_lock);
+
+            }
+            collision->is_valid = 0;
+            break;
+
+        default:
+            break;
     }
 }
 
 void update_enemy_state(entity_t* enemy) {
     if (enemy->healths < 0) {
-        enemy->is_valid = false;
         return;
     }
 
@@ -280,8 +331,15 @@ void update_enemy_state(entity_t* enemy) {
 
     if (bullet_collision == 0) return;
 
-    if (audio_player_get_current_progression_factor(impact_player) >= .99) {
-        audio_player_set_progression_factor(impact_player, 0);
+    { // audio_player_is_finished 
+        spinlock_acquire_or_wait(&impact_player->sample_lock);
+        assert(impact_player->frame_index <= impact_player->source.number_of_frames);
+
+        if (impact_player->frame_index == impact_player->source.number_of_frames)
+            impact_player->frame_index = 0;
+
+        spinlock_release(&impact_player->sample_lock);
+
     }
 
     enemy->healths -= 1;
@@ -293,11 +351,28 @@ void update_enemies(void) {
         entity_t* enemy = &(world->entities[i]);
         if (!enemy->is_valid) continue;
         if (enemy->entity_type != ENTITY_enemy) continue;
-        // so here we will read our action list a do stuff
+
         update_enemy_state(enemy);
 
-        if (!enemy->is_valid) continue;
+        if (enemy->healths < 0) {
+            size_t count = get_random_int_in_range(2, 5);
 
+            for (size_t i = 0; i < count; i++) {
+                entity_t* gold = entity_create();
+                if (gold == 0) break;
+
+                entity_setup_item(gold);
+                item_setup_gold(gold);
+
+                float32 x = get_random_float32_in_range(-0.5, 0.5);
+                float32 y = get_random_float32_in_range(-0.5, 0.5);
+
+                gold->position = v2_add(enemy->position, v2(x, y));
+            }
+
+            enemy->is_valid = false;
+            continue; 
+        }
 
         if ((enemy->timer + SHOOT_INTERVAL * 8) < now_time) {
             enemy->timer = now_time;
@@ -317,7 +392,10 @@ void update_enemies(void) {
                 bullet->position = enemy->position;
 
                 float32 normalized = (float32)i / (float32)(count - 1);
-                float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2) + atan2f(position.y, position.x) + PI32 / 2;
+                float32 angle = normalized * shoot_angle 
+                              + (PI32 / 2) - (shoot_angle / 2)
+                              + atan2f(position.y, position.x)
+                              + PI32 / 2;
 
                 float32 y = sinf(angle);
                 float32 x = cosf(angle);
@@ -426,10 +504,8 @@ void update_game_scene(void) {
 
 void update_loading_screen(void) {
     reset_draw_frame(&draw_frame);
-    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); 
-    draw_frame.view = m4_make_scale(v3(1, 1, 1));
-
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, 0, window.pixel_height, -1, 10); 
+    draw_frame.view = m4_make_scale(v3(1, 1, 1));
     draw_image(load_screen, v2(0,0), v2(window.pixel_width, window.pixel_height), COLOR_WHITE);
 }
 
@@ -468,6 +544,7 @@ void game_late_init(void) {
     sprites[SPRITE_player]    = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_enemy]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/enemies/enemy_01.png"),  get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_bullet_01] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/bullets/bullet_01.png"), get_heap_allocator()), .size = v2(0.2, 0.2) };
+    sprites[SPRITE_gold]      = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/items/gold.png"),        get_heap_allocator()), .size = v2(0.2, 0.2) };
 
     //os_sleep(1000); // loading kinda works
 }
