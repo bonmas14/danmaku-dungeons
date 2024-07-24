@@ -7,8 +7,8 @@
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
 
-#define MAP_WIDTH 20
-#define MAP_HEIGHT 10
+#define MAP_WIDTH 100
+#define MAP_HEIGHT 100
 
 #define RESPAWN_POINT v2(0, -4)
 // bosses are like 100 - 1000
@@ -17,7 +17,6 @@
 #include "game_structures.c"
 #include "globals.c"
 #include "world_generation.c"
-
 
 sprite_t sprite_get(sprite_id_t id) {
     if (id >= SPRITE_MAX || id <= SPRITE_error) return sprites[SPRITE_error];
@@ -254,7 +253,6 @@ void update_enemy_state(entity_t* enemy) {
             impact_player->frame_index = 0;
 
         spinlock_release(&impact_player->sample_lock);
-
     }
 
     enemy->healths -= 1;
@@ -348,6 +346,114 @@ void update_bullets(void) {
     }
 }
 
+void update_editor(void) {
+    reset_draw_frame(&draw_frame);
+
+    float32 multiplier = 1.0f;
+    if (is_key_down(KEY_SHIFT)) multiplier = 5.0f;
+
+    Vector2 input_axis = v2(0, 0);
+    if (is_key_down('W')) input_axis.y += 1.0f;
+    if (is_key_down('S')) input_axis.y -= 1.0f;
+    if (is_key_down('A')) input_axis.x -= 1.0f;
+    if (is_key_down('D')) input_axis.x += 1.0f;
+
+    input_axis = v2_normalize(input_axis);
+    input_axis = v2_mulf(input_axis, multiplier * delta_time * PLAYER_SPEED);
+
+	for (u64 i = 0; i < input_frame.number_of_events; i++) {
+		Input_Event e = input_frame.events[i];
+		
+		switch (e.kind) {
+			case INPUT_EVENT_SCROLL:
+                camera.scale += -e.yscroll * delta_time * 100.0;
+                break;
+            default:
+                break;
+		}
+	}
+
+    camera.position = v2_add(camera.position, input_axis);
+
+    if (is_key_down(KEY_SHIFT)) {
+        if (is_key_down(KEY_F8)) {
+            generate_map();
+        }
+    } else {
+        if (is_key_just_pressed(KEY_F8)) {
+            generate_map();
+        }
+    }
+
+    if (is_key_just_pressed(KEY_F7)) {
+        camera.scale = CAMERA_SCALE;
+        program_state = GAME_scene;
+    }
+ 
+    float64 scale = camera.scale;
+
+    draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
+    draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
+
+    Vector2 mouse_wp = screen_to_world(v2(input_frame.mouse_x, input_frame.mouse_y), v2(window.width, window.height), draw_frame);
+    // placing / deleting block
+    
+    int32_t x = (int32_t)roundf(mouse_wp.x - 0.5f) + MAP_WIDTH / 2;
+    int32_t y = (int32_t)roundf(mouse_wp.y - 0.5f) + MAP_HEIGHT / 2;
+
+    if ((x >= 0 && x < MAP_WIDTH) && (y >= 0 && y < MAP_HEIGHT)) {
+        if (is_key_down(MOUSE_BUTTON_LEFT)) {
+            world->world_map[x + y * MAP_WIDTH].type = BLOCK_wall;
+        }
+        if (is_key_down(MOUSE_BUTTON_RIGHT)) {
+            world->world_map[x + y * MAP_WIDTH].type = BLOCK_floor;
+        }
+    }
+
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        int32_t x = i % MAP_WIDTH;
+        int32_t y = i / MAP_WIDTH;
+
+        switch (world->world_map[i].type) {
+            case BLOCK_floor: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
+                break;
+            case BLOCK_wall: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
+                break;
+            default:
+                break;
+        }
+    }
+
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t ent = world->entities[i];
+
+        if (!ent.is_valid) continue;
+
+        Vector4 color = COLOR_WHITE;
+
+        if (ent.entity_type == ENTITY_bullet) {
+            switch (ent.bullet_type) {
+                case BULLET_player_01:
+                    color = hex_to_rgba(0xFFE1BF7F);
+                    break;
+                default:
+                    color = hex_to_rgba(0xFFFFFFFF);
+                    break;
+            }
+        }
+
+        Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
+        draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
+    }
+
+    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
+    draw_frame.view = m4_make_scale(v3(1, 1, 1));
+
+    draw_text(font, STR("editor. f8 regenerate map. f7 exit editor"), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
+}
 
 void update_game_scene(void) {
     reset_draw_frame(&draw_frame);
@@ -356,15 +462,34 @@ void update_game_scene(void) {
     animate_v2_to_target(&camera.position, target_pos, delta_time, 30.0f);
 
     float64 scale = camera.scale;
-    
-    //camera.position = player_entity->position;
-
     draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
     draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
 
     update_bullets();
     update_enemies();
     update_player();
+    
+    if (is_key_just_pressed(KEY_F7)) {
+        program_state = GAME_editor;
+    }
+
+
+
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        int32_t x = i % MAP_WIDTH;
+        int32_t y = i / MAP_WIDTH;
+
+        switch (world->world_map[i].type) {
+            case BLOCK_floor: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
+                break;
+            case BLOCK_wall: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
+                break;
+            default:
+                break;
+        }
+    }
 
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t ent = world->entities[i];
@@ -467,6 +592,7 @@ void game_late_init(void) {
 }
 
 int entry(int argc, char **argv) {
+    seed_for_random = rdtsc();
     game_early_init();
 
     float64 prew_time = os_get_current_time_in_seconds();
@@ -486,6 +612,7 @@ int entry(int argc, char **argv) {
             case GAME_menu:
                 break;
             case GAME_editor: 
+                update_editor();
                 break;
             case GAME_scene: 
                 update_game_scene();

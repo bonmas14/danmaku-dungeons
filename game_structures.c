@@ -34,6 +34,7 @@ typedef enum sprite_id_t {
 
 typedef enum block_archetype_t {
     BLOCK_empty,
+    BLOCK_floor,
     BLOCK_wall,
     BLOCK_MAX,
 } block_archetype_t;
@@ -75,8 +76,6 @@ typedef struct block_t {
     block_archetype_t type;
     entity_t prototype_entity;
 } block_t;
-
-
 
 typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
