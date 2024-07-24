@@ -1,108 +1,23 @@
 #define MAX_ENTITY_COUNT 4096
 #define MAX_FRAME_COUNT (1 << 16)
 #define CAMERA_SCALE 5.0f
-#define CAMERA_SPEED 1.0f
 #define PLAYER_SPEED 4.5f
 #define PLAYER_BULLET_SPEED 20.0f
 #define BULLET_01_SPEED 1.0f
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
 
+#define MAP_WIDTH 20
+#define MAP_HEIGHT 10
+
 #define RESPAWN_POINT v2(0, -4)
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
-typedef enum entity_archetype_t { 
-    ENTITY_null,
-    ENTITY_camera,
-    ENTITY_enemy,
-    ENTITY_item,
-    ENTITY_bullet, 
-    ENTITY_player, 
-} entity_archetype_t;
+#include "game_structures.c"
+#include "globals.c"
+#include "world_generation.c"
 
-typedef enum bullet_archetype_t {
-    BULLET_player_01,
-    BULLET_enemy_01,
-} bullet_archetype_t;
-
-typedef enum item_archetype_t {
-    ITEM_gold,
-} item_archetype_t;
-
-typedef enum entity_state_t {
-    ENT_STATE_none,
-    ENT_STATE_dead,
-    ENT_STATE_alive,
-} entity_state_t;
-
-typedef enum sprite_id_t {
-    SPRITE_error,
-    SPRITE_enemy,
-    SPRITE_gold,
-    SPRITE_player,
-    SPRITE_bullet_01,
-    SPRITE_bullet_02,
-    SPRITE_MAX,
-} sprite_id_t;
-
-typedef enum game_state_t {
-    GAME_init,
-    GAME_menu,
-    GAME_editor,
-    GAME_scene,
-} game_state_t;
-
-typedef struct sprite_t {
-    Gfx_Image* image;
-    Vector2 size;
-} sprite_t;
-
-typedef struct entity_t {
-    bool is_valid;
-
-    Vector2 position;
-    Vector2 direction;
-
-    entity_state_t state;
-
-    entity_archetype_t entity_type;
-    bullet_archetype_t bullet_type;
-    item_archetype_t item_type;
-
-    int32_t healths;
-    float32 radius;
-
-    sprite_t sprite;
-
-    float64 timer; 
-    float32 movement_speed;
-} entity_t;
-
-typedef struct world_t {
-    entity_t entities[MAX_ENTITY_COUNT];
-} world_t;
-
-Gfx_Image* load_screen = 0;
-Gfx_Font* font = 0;
-
-Audio_Player* impact_player;
-
-sprite_t sprites[SPRITE_MAX];
-
-world_t* world = 0;
-
-game_state_t program_state = GAME_init;
-
-float64 now_time = 0;
-float64 delta_time = 0;
-
-entity_t* player_entity;
-
-struct {
-    Vector2 position;
-    float32 scale;
-} camera;
 
 sprite_t sprite_get(sprite_id_t id) {
     if (id >= SPRITE_MAX || id <= SPRITE_error) return sprites[SPRITE_error];
@@ -545,7 +460,9 @@ void game_late_init(void) {
     sprites[SPRITE_enemy]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/enemies/enemy_01.png"),  get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_bullet_01] = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/bullets/bullet_01.png"), get_heap_allocator()), .size = v2(0.2, 0.2) };
     sprites[SPRITE_gold]      = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/items/gold.png"),        get_heap_allocator()), .size = v2(0.2, 0.2) };
-
+    
+    generator_init();
+    generate_map();
     //os_sleep(1000); // loading kinda works
 }
 
