@@ -1,7 +1,7 @@
 #define MAX_ENTITY_COUNT 4096
 #define MAX_FRAME_COUNT (1 << 16)
-#define CAMERA_SCALE 5.0f
-#define PLAYER_SPEED 4.5f
+#define CAMERA_SCALE 10.0f
+#define PLAYER_SPEED 6.5f
 #define PLAYER_BULLET_SPEED 20.0f
 #define BULLET_01_SPEED 1.0f
 #define SHOOT_INTERVAL 0.1f
@@ -366,7 +366,7 @@ void update_editor(void) {
 		
 		switch (e.kind) {
 			case INPUT_EVENT_SCROLL:
-                camera.scale += -e.yscroll * delta_time * 100.0;
+                camera.scale += -e.yscroll * delta_time * 200.0;
                 break;
             default:
                 break;

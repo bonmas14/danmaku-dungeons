@@ -19,10 +19,3 @@ struct {
     float32 scale;
 } camera;
 
-struct {
-    int32_t min_tunnel_count; 
-    int32_t max_tunnel_count; 
-
-    int32_t min_room_size; 
-    int32_t max_room_size; 
-} gen_conf;
