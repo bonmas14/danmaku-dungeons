@@ -74,7 +74,7 @@ typedef struct entity_t {
 
 typedef struct block_t {
     block_archetype_t type;
-    entity_t prototype_entity;
+    entity_t prototype;
 } block_t;
 
 typedef struct world_t {

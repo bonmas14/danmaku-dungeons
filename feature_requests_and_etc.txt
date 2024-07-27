@@ -1,4 +1,7 @@
-
+Only english in window title:
+    Probably because of WindowOpenEx (Wide char versions is WindowOpenExW)
+    Maybe it should be Wide char version? But it's not that required. 
+    Because different languages work in game. 
 
 Feature requests:
 * playback speed for audio players

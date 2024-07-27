@@ -247,6 +247,9 @@ void generator_draw_room(aabb_room_t room) {
     }
 }
 
+// It freezed randomly one time...
+// but it still works after all.
+// So no fix for it right now.   | 27.07.2024
 void generate_map(void) {
     room_list.global_bounds = (aabb_room_t) { 
         .center_x = gen_conf.map_width  / 2,
@@ -268,10 +271,19 @@ void generate_map(void) {
         generate_child_rooms();
     }
 
+    // player spawn position is first room we render!
     for (size_t i = room_list.current_index; i > 0; i--) {
         size_t index = i - 1;
         aabb_room_t room = room_list.rooms[index];
 
         generator_draw_room(room);
+
+        
+        if (i == 0) {
+            size_t coord = room.center_x + room.center_y * gen_conf.map_width;
+            world->world_map[coord].prototype.entity_type = ENTITY_player;
+        } else {
+            //spawn some enemies
+        }
     }
 }

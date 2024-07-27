@@ -1,0 +1,5 @@
+
+
+* generation of enemies, based on level. not external
+* collisions with blocks!
+

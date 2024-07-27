@@ -375,6 +375,7 @@ void update_editor(void) {
 
     camera.position = v2_add(camera.position, input_axis);
 
+            
     if (is_key_down(KEY_SHIFT)) {
         if (is_key_down(KEY_F8)) {
             generate_map();
@@ -452,9 +453,10 @@ void update_editor(void) {
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
     draw_text(font, STR("editor. f8 regenerate map. f7 exit editor"), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
 }
 
+// @gameupdate
 void update_game_scene(void) {
     reset_draw_frame(&draw_frame);
 
@@ -468,12 +470,10 @@ void update_game_scene(void) {
     update_bullets();
     update_enemies();
     update_player();
-    
+
     if (is_key_just_pressed(KEY_F7)) {
         program_state = GAME_editor;
     }
-
-
 
     for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
         int32_t x = i % MAP_WIDTH;
@@ -523,7 +523,6 @@ void update_game_scene(void) {
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
-
     int32_t offset_counter = 2;
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t ent = world->entities[i];
@@ -539,7 +538,7 @@ void update_game_scene(void) {
         }
 
     }
-    draw_text(font, tprintf("frametime\t: %0.2f", 1.0 / delta_time), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
 }
 
 void update_loading_screen(void) {
@@ -565,6 +564,7 @@ void game_early_init(void) {
     load_screen = load_image_from_disk(STR("res/graphics/loading.png"), get_heap_allocator());
 }
 
+// @resources
 void game_late_init(void) {
     world = alloc(get_heap_allocator(), sizeof(world_t));
 
@@ -624,7 +624,8 @@ int entry(int argc, char **argv) {
 
         if (program_state == GAME_init) { 
             game_late_init(); 
-
+            
+            // todo: spawn player and enemies based on map data
             player_entity = entity_create();
             entity_setup_player(player_entity);
             player_entity->position = v2(0, 0);
