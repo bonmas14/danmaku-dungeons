@@ -1,7 +1,8 @@
 #define MAX_ENTITY_COUNT 4096
 #define MAX_FRAME_COUNT (1 << 16)
-#define CAMERA_SCALE 10.0f
-#define PLAYER_SPEED 6.5f
+#define CAMERA_SCALE 7.5f
+#define PLAYER_SPEED 4.5f
+#define MAX_DIST_TO_PLAYER 20.0f
 #define PLAYER_BULLET_SPEED 20.0f
 #define BULLET_01_SPEED 1.0f
 #define SHOOT_INTERVAL 0.1f
@@ -10,7 +11,6 @@
 #define MAP_WIDTH 100
 #define MAP_HEIGHT 100
 
-#define RESPAWN_POINT v2(0, -4)
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
@@ -70,6 +70,21 @@ void item_setup_gold(entity_t* entity) {
     entity->radius = entity->sprite.size.x / 2;
 }
 
+
+block_t get_block_by_world_coord(Vector2 position) {
+    // @cleanup change this to something that related to current map. like gen_conf struct
+    position = v2_add(position, v2(MAP_WIDTH / 2, MAP_HEIGHT / 2)); 
+    
+    position = v2(clamp(position.x, 0, (f32)MAP_WIDTH), clamp(position.y, 0, (f32)MAP_HEIGHT));
+
+    // @cleanup Vector2i will be here
+
+    s32 x = (s32)position.x;
+    s32 y = (s32)position.y;
+
+    return world->world_map[x + y * MAP_WIDTH];
+}
+
 entity_t* entity_create(void) {
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         if (!world->entities[i].is_valid) {
@@ -97,6 +112,30 @@ void entity_clear_all_bullets(void) {
 
         if (bullet->entity_type == ENTITY_bullet)
             bullet->is_valid = false;
+    }
+}
+
+void scan_world_and_spawn_entitites(void) {
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        int32_t x = i % MAP_WIDTH;
+        int32_t y = i / MAP_WIDTH;
+
+        switch (world->world_map[i].prototype.entity_type) {
+            case ENTITY_player:
+                player_entity = entity_create();
+                entity_setup_player(player_entity);
+                player_entity->position = v2(((f32)x - MAP_WIDTH / 2.0) + 0.5, ((f32)y - MAP_HEIGHT / 2.0) + 0.5);
+                respawn_point = player_entity->position;
+                break;
+            case ENTITY_enemy:
+                entity_t* enemy = entity_create();
+                entity_setup_enemy(enemy);
+                enemy->position = v2(((f32)x - MAP_WIDTH / 2.0) + 0.5, ((f32)y - MAP_HEIGHT / 2.0) + 0.5);
+                enemy->timer = now_time;
+                break;
+            default:
+                break;
+        }
     }
 }
 
@@ -184,6 +223,9 @@ void player_shoot(entity_t* player) {
 void update_player(void) {
     if (player_entity->healths < 0) {
         player_entity->is_valid = false;
+        
+        program_state = GAME_menu;
+
         return;
     }
 
@@ -191,18 +233,24 @@ void update_player(void) {
         player_shoot(player_entity);
     }
 
-    float32 multiplier = 1.0f;
-    if (is_key_down(KEY_SHIFT)) multiplier = 0.35f;
+    Vector2 multiplier = v2(1, 1);
+    if (is_key_down(KEY_CTRL)) multiplier = v2(1.75f, 1.75f);
+    if (is_key_down(KEY_SHIFT)) multiplier = v2(0.35f, 0.35f);
 
     Vector2 input_axis = v2(0, 0);
     if (is_key_down('W')) input_axis.y += 1.0f;
     if (is_key_down('S')) input_axis.y -= 1.0f;
     if (is_key_down('A')) input_axis.x -= 1.0f;
     if (is_key_down('D')) input_axis.x += 1.0f;
+    
+    if (get_block_by_world_coord(v2(player_entity->position.x + input_axis.x / 10, player_entity->position.y)).type == BLOCK_wall)
+        multiplier.x = 0;
+    if (get_block_by_world_coord(v2(player_entity->position.x, player_entity->position.y + input_axis.y / 10)).type == BLOCK_wall)
+        multiplier.y = 0;
 
     input_axis = v2_normalize(input_axis);
-    input_axis = v2_mulf(input_axis, multiplier * delta_time * player_entity->movement_speed);
-
+    input_axis = v2_mulf(v2_mul(input_axis, multiplier), delta_time * player_entity->movement_speed);
+    
     player_entity->position = v2_add(player_entity->position, input_axis);
 
     entity_t* collision = check_collision_with_relevant_entities(player_entity);
@@ -214,7 +262,7 @@ void update_player(void) {
             player_entity->healths -= 1;
 
             entity_clear_all_bullets(); 
-            player_entity->position = RESPAWN_POINT;
+            player_entity->position = respawn_point;
             break;
         case ENTITY_item:
             // add item, play sound
@@ -288,6 +336,9 @@ void update_enemies(void) {
         }
 
         if ((enemy->timer + SHOOT_INTERVAL * 8) < now_time) {
+            if (v2_sqr_dist(player_entity->position, enemy->position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER))
+                continue;
+
             enemy->timer = now_time;
 
             size_t count = get_random_int_in_range(2, 4);
@@ -321,6 +372,7 @@ void update_enemies(void) {
     }
 }
 
+// @feature bullets destroys when enemy dies
 void update_bullets(void) {
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t* bullet = &(world->entities[i]);
@@ -337,8 +389,15 @@ void update_bullets(void) {
         switch (bullet->bullet_type) { 
             case BULLET_enemy_01:
             case BULLET_player_01:
-                bullet->position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * delta_time));
-                bullet->timer += delta_time;
+                Vector2 position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * delta_time));
+
+                if (get_block_by_world_coord(position).type == BLOCK_wall) {
+                    bullet->is_valid = false;
+                } else {
+                    bullet->position = position;
+                    bullet->timer += delta_time;
+                }
+
                 break;
             default: 
                 break;
@@ -346,6 +405,70 @@ void update_bullets(void) {
     }
 }
 
+void update_menu(void) {
+    reset_draw_frame(&draw_frame);
+
+    if (is_key_just_pressed(KEY_ESCAPE))
+        window.should_close = true;
+
+    if (is_key_down(KEY_SPACEBAR)) {
+        entity_reset_all();
+        generate_map();
+        scan_world_and_spawn_entitites();
+        camera.scale = CAMERA_SCALE;
+        program_state = GAME_scene;
+    }
+
+ 
+    float64 scale = camera.scale;
+
+    draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
+    draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
+
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        int32_t x = i % MAP_WIDTH;
+        int32_t y = i / MAP_WIDTH;
+
+        switch (world->world_map[i].type) {
+            case BLOCK_floor: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
+                break;
+            case BLOCK_wall: 
+                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
+                break;
+            default:
+                break;
+        }
+    }
+
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t ent = world->entities[i];
+
+        if (!ent.is_valid) continue;
+
+        Vector4 color = COLOR_WHITE;
+
+        if (ent.entity_type == ENTITY_bullet) {
+            switch (ent.bullet_type) {
+                case BULLET_player_01:
+                    color = hex_to_rgba(0xFFE1BF7F);
+                    break;
+                default:
+                    color = hex_to_rgba(0xFFFFFFFF);
+                    break;
+            }
+        }
+
+        Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
+        draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
+    }
+
+    draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
+    draw_frame.view = m4_make_scale(v3(1, 1, 1));
+
+    draw_text(font, STR("You're in game menu. \nPress SPACE to start\nPress ESC to exit"), 30, v2(0, -window.pixel_height / 2), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
+}
 void update_editor(void) {
     reset_draw_frame(&draw_frame);
 
@@ -378,11 +501,15 @@ void update_editor(void) {
             
     if (is_key_down(KEY_SHIFT)) {
         if (is_key_down(KEY_F8)) {
+            entity_reset_all();
             generate_map();
+            scan_world_and_spawn_entitites();
         }
     } else {
         if (is_key_just_pressed(KEY_F8)) {
+            entity_reset_all();
             generate_map();
+            scan_world_and_spawn_entitites();
         }
     }
 
@@ -452,8 +579,8 @@ void update_editor(void) {
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
-    draw_text(font, STR("editor. f8 regenerate map. f7 exit editor"), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 48, v2(0, -60), v2(1, 1), COLOR_WHITE);
+    draw_text(font, STR("editor. f8 regenerate map. f7 exit editor"), 30, v2(0, -30), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
 }
 
 // @gameupdate
@@ -471,10 +598,14 @@ void update_game_scene(void) {
     update_enemies();
     update_player();
 
+    if (is_key_just_pressed(KEY_ESCAPE)) {
+        program_state = GAME_menu;
+    }
     if (is_key_just_pressed(KEY_F7)) {
         program_state = GAME_editor;
     }
 
+    // @cleanup change this to something that related to current map. like gen_conf struct
     for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
         int32_t x = i % MAP_WIDTH;
         int32_t y = i / MAP_WIDTH;
@@ -530,15 +661,19 @@ void update_game_scene(void) {
         if (!ent.is_valid) continue;
 
         if (ent.entity_type == ENTITY_player) {
-            draw_text(font, tprintf("player health\t: %00d", ent.healths), 48, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
+            draw_text(font, tprintf("player health\t: %00d", ent.healths), 30, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
         }
 
         if (ent.entity_type == ENTITY_enemy) {
-            draw_text(font, tprintf("enemy health\t: %00d", ent.healths), 48, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
+            draw_text(font, tprintf("enemy health\t: %00d", ent.healths), 30, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
         }
 
+        if (offset_counter > 5) {
+            break;
+        }
     }
-    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 48, v2(0, -30), v2(1, 1), COLOR_WHITE);
+
+    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -30), v2(1, 1), COLOR_WHITE);
 }
 
 void update_loading_screen(void) {
@@ -547,6 +682,7 @@ void update_loading_screen(void) {
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
     draw_image(load_screen, v2(0,0), v2(window.pixel_width, window.pixel_height), COLOR_WHITE);
 }
+
 
 void game_early_init(void) {
     window.title = STR("Danmaku dungeons");
@@ -568,7 +704,8 @@ void game_early_init(void) {
 void game_late_init(void) {
     world = alloc(get_heap_allocator(), sizeof(world_t));
 
-    font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
+    //font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
+    font = load_font_from_disk(STR("res/fonts/arial.ttf"), get_heap_allocator());
 
     Audio_Source source = { 0 };
     impact_player = audio_player_get_one();
@@ -587,7 +724,8 @@ void game_late_init(void) {
     sprites[SPRITE_gold]      = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/items/gold.png"),        get_heap_allocator()), .size = v2(0.2, 0.2) };
     
     generator_init();
-    generate_map();
+
+
     //os_sleep(1000); // loading kinda works
 }
 
@@ -603,13 +741,13 @@ int entry(int argc, char **argv) {
         now_time = os_get_current_time_in_seconds();
         delta_time = now_time - prew_time;
 
-        if (is_key_just_pressed(KEY_ESCAPE)) window.should_close = true;
 
         switch (program_state) {
             case GAME_init: 
                 update_loading_screen(); 
                 break;
             case GAME_menu:
+                update_menu();
                 break;
             case GAME_editor: 
                 update_editor();
@@ -624,21 +762,9 @@ int entry(int argc, char **argv) {
 
         if (program_state == GAME_init) { 
             game_late_init(); 
-            
-            // todo: spawn player and enemies based on map data
-            player_entity = entity_create();
-            entity_setup_player(player_entity);
-            player_entity->position = v2(0, 0);
-        
-            for (size_t i = 0; i < 10; i++) {
-                entity_t* enemy = entity_create();
-                entity_setup_enemy(enemy);
-                enemy->position  = v2(get_random_float32_in_range(-10, 10), get_random_float32_in_range(-10, 10));
-                enemy->timer = now_time;
-            }
-
-            program_state = GAME_scene;
+            program_state = GAME_menu;
         } 
+
         prew_time = now_time;
     }
 

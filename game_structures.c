@@ -72,9 +72,16 @@ typedef struct entity_t {
     float32 movement_speed;
 } entity_t;
 
+typedef struct entity_prototype_t {
+    entity_archetype_t entity_type;
+    // enemy_archetype_t ?? 
+    bullet_archetype_t bullet_type;
+    item_archetype_t item_type;
+} entity_prototype_t;
+
 typedef struct block_t {
     block_archetype_t type;
-    entity_t prototype;
+    entity_prototype_t prototype;
 } block_t;
 
 typedef struct world_t {

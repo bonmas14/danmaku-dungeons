@@ -1,30 +1,39 @@
 #define MAX_LIST_SIZE 1024
 #define MIN_ROOM_COUNT (5 + 10)
 
+typedef enum door_side_t {
+    DOOR_NONE,
+    DOOR_ON_LEFT,
+    DOOR_ON_RIGHT,
+    DOOR_ON_TOP,
+    DOOR_ON_BOTTOM
+} door_side_t;
+
 typedef struct aabb_room_t {
-    int32_t center_x;    
-    int32_t center_y;    
-    int32_t size_x;    
-    int32_t size_y; 
+    s32 center_x;    
+    s32 center_y;    
+    s32 size_x;    
+    s32 size_y; 
+    door_side_t door_on_side;
 } aabb_room_t;
 
 struct {
-    int32_t map_width;
-    int32_t map_height;
+    s32 map_width;
+    s32 map_height;
 
-    int32_t min_tunnel_count; 
-    int32_t max_tunnel_count; 
+    s32 min_tunnel_count; 
+    s32 max_tunnel_count; 
 
-    int32_t min_tunnel_size; 
-    int32_t max_tunnel_size; 
+    s32 min_tunnel_size; 
+    s32 max_tunnel_size; 
 
-    int32_t min_room_size; 
-    int32_t max_room_size; 
+    s32 min_room_size; 
+    s32 max_room_size; 
 
-    int32_t min_rooms_per_parent;
-    int32_t max_rooms_per_parent;
+    s32 min_rooms_per_parent;
+    s32 max_rooms_per_parent;
 
-    int32_t distance_between_tunnels;
+    s32 distance_between_tunnels;
 } gen_conf;
 
 struct {
@@ -44,7 +53,7 @@ bool check_collision(aabb_room_t a, aabb_room_t b) {
     return (collide_x && collide_y);
 }
 
-bool room_contains_coord(aabb_room_t container, int32_t x, int32_t y) {
+bool room_contains_coord(aabb_room_t container, s32 x, s32 y) {
     bool contains_x = absi(container.center_x - x) < container.size_x;
     bool contains_y = absi(container.center_y - y) < container.size_y;
 
@@ -75,11 +84,11 @@ void generate_base_tunnels(void) {
     for (size_t i = 0; i < current_count; i++) {
         bool vertical = i % 2;
 
-        int32_t x = get_random_int_in_range(gen_conf.max_tunnel_size, gen_conf.map_width - gen_conf.max_tunnel_size);
-        int32_t y = get_random_int_in_range(gen_conf.max_tunnel_size, gen_conf.map_height - gen_conf.max_tunnel_size);
+        s32 x = get_random_int_in_range(gen_conf.max_tunnel_size, gen_conf.map_width - gen_conf.max_tunnel_size);
+        s32 y = get_random_int_in_range(gen_conf.max_tunnel_size, gen_conf.map_height - gen_conf.max_tunnel_size);
 
-        int32_t width = get_random_int_in_range(gen_conf.min_tunnel_size, gen_conf.max_tunnel_size) / 2;
-        int32_t height = get_random_int_in_range(gen_conf.min_tunnel_size, gen_conf.max_tunnel_size) / 2;
+        s32 width = get_random_int_in_range(gen_conf.min_tunnel_size, gen_conf.max_tunnel_size) / 2;
+        s32 height = get_random_int_in_range(gen_conf.min_tunnel_size, gen_conf.max_tunnel_size) / 2;
 
         aabb_room_t* current = &(room_list.rooms[room_list.current_index++]);
 
@@ -123,27 +132,31 @@ void generate_base_tunnels(void) {
 }
 
 void create_room_on_bounds_hor(aabb_room_t* result, aabb_room_t parent_room) {
-    int32_t side = get_random_int_in_range(0, 100);
+    s32 side = get_random_int_in_range(0, 100);
 
-    int32_t y;
+    s32 y;
     if (side > 50) { 
         y = parent_room.center_y + parent_room.size_y + result->size_y + 1;
+        result->door_on_side = DOOR_ON_BOTTOM;
     } else {
         y = parent_room.center_y - parent_room.size_y - result->size_y - 1;
+        result->door_on_side = DOOR_ON_TOP;
     }
 
     result->center_x = get_random_int_in_range(parent_room.center_x - parent_room.size_x + result->size_x, parent_room.center_x + parent_room.size_x - result->size_x);
     result->center_y = y;
 }
 void create_room_on_bounds_vert(aabb_room_t* result, aabb_room_t parent_room) {
-    int32_t side = get_random_int_in_range(0, 100);
+    s32 side = get_random_int_in_range(0, 100);
     
-    int32_t x;
+    s32 x;
 
     if (side > 50) { 
         x = parent_room.center_x + parent_room.size_x + result->size_x + 1;
+        result->door_on_side = DOOR_ON_LEFT;
     } else {
         x = parent_room.center_x - parent_room.size_x - result->size_x - 1;
+        result->door_on_side = DOOR_ON_RIGHT;
     }
 
     result->center_x = x;
@@ -151,7 +164,7 @@ void create_room_on_bounds_vert(aabb_room_t* result, aabb_room_t parent_room) {
 }
 
 void create_room_on_bounds(aabb_room_t parent_room) {
-    int32_t attempts = gen_loc_conf.attempts_per_room;
+    s32 attempts = gen_loc_conf.attempts_per_room;
 
     aabb_room_t* current = &(room_list.rooms[room_list.current_index++]);
 
@@ -209,22 +222,23 @@ void generate_child_rooms(void) {
 }
 
 void generator_clear(void) {
-    for (int32_t i = 0; i < (gen_conf.map_width * gen_conf.map_height); i++) {
+    for (s32 i = 0; i < (gen_conf.map_width * gen_conf.map_height); i++) {
         world->world_map[i] = (block_t) { .type = BLOCK_empty };
     }
     room_list.current_index = 0;
 }
 
+
 void generator_draw_room(aabb_room_t room) {
-    int32_t start_x = room.center_x - room.size_x;
-    int32_t start_y = room.center_y - room.size_y;
-    int32_t end_x = room.center_x + room.size_x;
-    int32_t end_y = room.center_y + room.size_y;
+    s32 start_x = room.center_x - room.size_x;
+    s32 start_y = room.center_y - room.size_y;
+    s32 end_x = room.center_x + room.size_x;
+    s32 end_y = room.center_y + room.size_y;
 
     //log("draw box dimensions (x,y,x,y): %d %d %d %d", start_x, start_y, end_x, end_y);
 
-    for (int32_t y = start_y; y < end_y; y++) {
-        for (int32_t x = start_x; x < end_x; x++) {
+    for (s32 y = start_y; y < end_y; y++) {
+        for (s32 x = start_x; x < end_x; x++) {
             if ((x < 0 || x > gen_conf.map_width) || (y < 0 || y > gen_conf.map_height))
                 continue;
 
@@ -245,6 +259,33 @@ void generator_draw_room(aabb_room_t room) {
             world->world_map[x + y * gen_conf.map_width] = block;
         }
     }
+}
+
+void generator_draw_door(aabb_room_t to) {
+    aabb_room_t door = { .size_x = 3, .size_y = 3 };
+
+    switch (to.door_on_side) {
+        case DOOR_ON_BOTTOM:
+            door.center_x = to.center_x;
+            door.center_y = to.center_y - to.size_y;
+            break;
+        case DOOR_ON_TOP:
+            door.center_x = to.center_x;
+            door.center_y = to.center_y + to.size_y;
+            break;
+        case DOOR_ON_RIGHT:
+            door.center_x = to.center_x + to.size_x;
+            door.center_y = to.center_y;
+            break;
+        case DOOR_ON_LEFT:
+            door.center_x = to.center_x - to.size_x;
+            door.center_y = to.center_y;
+            break;
+        case DOOR_NONE:
+            return;
+    }
+
+    generator_draw_room(door);
 }
 
 // It freezed randomly one time...
@@ -271,19 +312,32 @@ void generate_map(void) {
         generate_child_rooms();
     }
 
-    // player spawn position is first room we render!
     for (size_t i = room_list.current_index; i > 0; i--) {
         size_t index = i - 1;
         aabb_room_t room = room_list.rooms[index];
 
         generator_draw_room(room);
+        generator_draw_door(room);
 
-        
-        if (i == 0) {
+        if (index == 0) {
             size_t coord = room.center_x + room.center_y * gen_conf.map_width;
             world->world_map[coord].prototype.entity_type = ENTITY_player;
         } else {
-            //spawn some enemies
+            s32 x_min = room.center_x - room.size_x + 1;
+            s32 x_max = room.center_x + room.size_x - 1;
+
+            s32 y_min = room.center_y - room.size_y + 1;
+            s32 y_max = room.center_y + room.size_y - 1;
+            
+            // big enemies in big rooms!
+            s32 enemy_count = get_random_int_in_range(1, 10);
+            for (s32 j = 0; j < enemy_count; j ++) {
+                s32 x = get_random_int_in_range(x_min, x_max - 1);
+                s32 y = get_random_int_in_range(y_min, y_max - 1);
+
+                if (world->world_map[x + y * gen_conf.map_width].prototype.entity_type == ENTITY_null)
+                    world->world_map[x + y * gen_conf.map_width].prototype.entity_type = ENTITY_enemy;
+            }
         }
     }
 }
