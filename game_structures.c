@@ -63,6 +63,8 @@ typedef struct entity_t {
     bullet_archetype_t bullet_type;
     item_archetype_t item_type;
 
+    struct entity_t* shoot_by;
+
     int32_t healths;
     float32 radius;
 

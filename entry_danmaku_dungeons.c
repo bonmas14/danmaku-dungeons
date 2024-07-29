@@ -4,13 +4,13 @@
 #define PLAYER_SPEED 4.5f
 #define MAX_DIST_TO_PLAYER 20.0f
 #define PLAYER_BULLET_SPEED 20.0f
-#define BULLET_01_SPEED 1.0f
+#define BULLET_01_SPEED 2.0f
 #define SHOOT_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
-
 #define MAP_WIDTH 100
 #define MAP_HEIGHT 100
 
+#define MONEY_MOVE_SPEED 10.0f
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
@@ -208,6 +208,7 @@ void player_shoot(entity_t* player) {
 
             entity_setup_player_bullet(bullet);
             bullet->position = player->position;
+            bullet->shoot_by = player;
 
             float32 normalized = (float32)i / (float32)(count - 1);
             float32 angle = normalized * shoot_angle + (PI32 / 2) - (shoot_angle / 2) + atan2f(position.y, position.x) + PI32 / 2;
@@ -225,7 +226,6 @@ void update_player(void) {
         player_entity->is_valid = false;
         
         program_state = GAME_menu;
-
         return;
     }
 
@@ -354,6 +354,7 @@ void update_enemies(void) {
 
                 entity_setup_bullet_01(bullet);
                 bullet->position = enemy->position;
+                bullet->shoot_by = enemy;
 
                 float32 normalized = (float32)i / (float32)(count - 1);
                 float32 angle = normalized * shoot_angle 
@@ -379,8 +380,8 @@ void update_bullets(void) {
 
         if (!bullet->is_valid) continue;
         if (!(bullet->entity_type == ENTITY_bullet)) continue;
-
-        if (bullet->timer > 10.0) {
+        
+        if (bullet->timer > 10.0 || !bullet->shoot_by->is_valid) {
             bullet->is_valid = false;
             continue;
         }
@@ -405,46 +406,66 @@ void update_bullets(void) {
     }
 }
 
-void update_menu(void) {
-    reset_draw_frame(&draw_frame);
+void update_items(void) { 
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* item = &(world->entities[i]);
 
-    if (is_key_just_pressed(KEY_ESCAPE))
-        window.should_close = true;
+        if (!item->is_valid) continue;
+        if (!(item->entity_type == ENTITY_item)) continue;
 
-    if (is_key_down(KEY_SPACEBAR)) {
-        entity_reset_all();
-        generate_map();
-        scan_world_and_spawn_entitites();
-        camera.scale = CAMERA_SCALE;
-        program_state = GAME_scene;
+        // each bullet has its unique movement pattern, but not right now as you see
+        switch (item->item_type) { 
+            case ITEM_gold:
+                Vector2 position = v2_sub(item->position, player_entity->position);
+                f32 angle = atan2f(position.y, position.x);
+
+                item->position.x -= cosf(angle) * MONEY_MOVE_SPEED * delta_time;
+                item->position.y -= sinf(angle) * MONEY_MOVE_SPEED * delta_time;
+                break;
+            default: 
+                break;
+        }
     }
+}
 
- 
-    float64 scale = camera.scale;
-
-    draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
-    draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
-
+// @cleanup change MAP_WIDTH MAP_HEIGHT this to something that related to current map. like gen_conf struct
+void draw_world_map(bool optimize) {
     for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
         int32_t x = i % MAP_WIDTH;
         int32_t y = i / MAP_WIDTH;
 
+        Vector2 position = v2_sub(v2(x, y), v2(MAP_WIDTH / 2, MAP_HEIGHT / 2));
+
+        if (optimize) {
+            if (v2_sqr_dist(player_entity->position, position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER)) {
+                continue;
+            }
+        }
+
         switch (world->world_map[i].type) {
             case BLOCK_floor: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
+                draw_rect(position, v2(1, 1), hex_to_rgba(0x3f3f3fff));
                 break;
             case BLOCK_wall: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
+                draw_rect(position, v2(1, 1), hex_to_rgba(0x7f7f7fff));
                 break;
             default:
                 break;
         }
     }
+}
 
+void draw_entities(bool optimize) {
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t ent = world->entities[i];
 
         if (!ent.is_valid) continue;
+
+        if (optimize) {
+            if (v2_sqr_dist(player_entity->position, ent.position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER)) {
+                continue;
+            }
+        }
 
         Vector4 color = COLOR_WHITE;
 
@@ -461,7 +482,39 @@ void update_menu(void) {
 
         Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
         draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
+        
+        // cheat
+        if (ent.entity_type == ENTITY_player) {
+            Vector2 size = v2_mulf(v2(ent.radius, ent.radius), 2.0f);
+            offset = v2_mulf(size, -0.5f);
+            draw_circle(v2_add(ent.position, offset), size, hex_to_rgba(0xFFFFFF7F)); 
+        }
     }
+
+}
+
+void update_menu(void) {
+    reset_draw_frame(&draw_frame);
+
+    if (is_key_just_pressed(KEY_ESCAPE))
+        window.should_close = true;
+
+    if (is_key_just_pressed(KEY_SPACEBAR)) {
+        entity_reset_all();
+        generate_map();
+        scan_world_and_spawn_entitites();
+        camera.scale = CAMERA_SCALE;
+        program_state = GAME_scene;
+    }
+
+ 
+    float64 scale = camera.scale;
+
+    draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
+    draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
+    
+    draw_world_map(false);
+    draw_entities(false);
 
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
@@ -538,43 +591,8 @@ void update_editor(void) {
         }
     }
 
-    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
-        int32_t x = i % MAP_WIDTH;
-        int32_t y = i / MAP_WIDTH;
-
-        switch (world->world_map[i].type) {
-            case BLOCK_floor: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
-                break;
-            case BLOCK_wall: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
-                break;
-            default:
-                break;
-        }
-    }
-
-    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t ent = world->entities[i];
-
-        if (!ent.is_valid) continue;
-
-        Vector4 color = COLOR_WHITE;
-
-        if (ent.entity_type == ENTITY_bullet) {
-            switch (ent.bullet_type) {
-                case BULLET_player_01:
-                    color = hex_to_rgba(0xFFE1BF7F);
-                    break;
-                default:
-                    color = hex_to_rgba(0xFFFFFFFF);
-                    break;
-            }
-        }
-
-        Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
-        draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
-    }
+    draw_world_map(false);
+    draw_entities(false);
 
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
@@ -594,6 +612,7 @@ void update_game_scene(void) {
     draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
     draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
 
+    update_items();
     update_bullets();
     update_enemies();
     update_player();
@@ -605,51 +624,8 @@ void update_game_scene(void) {
         program_state = GAME_editor;
     }
 
-    // @cleanup change this to something that related to current map. like gen_conf struct
-    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
-        int32_t x = i % MAP_WIDTH;
-        int32_t y = i / MAP_WIDTH;
-
-        switch (world->world_map[i].type) {
-            case BLOCK_floor: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x3f3f3fff));
-                break;
-            case BLOCK_wall: 
-                draw_rect(v2(x - MAP_WIDTH / 2, y - MAP_HEIGHT / 2), v2(1, 1), hex_to_rgba(0x7f7f7fff));
-                break;
-            default:
-                break;
-        }
-    }
-
-    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t ent = world->entities[i];
-
-        if (!ent.is_valid) continue;
-
-        Vector4 color = COLOR_WHITE;
-
-        if (ent.entity_type == ENTITY_bullet) {
-            switch (ent.bullet_type) {
-                case BULLET_player_01:
-                    color = hex_to_rgba(0xFFE1BF7F);
-                    break;
-                default:
-                    color = hex_to_rgba(0xFFFFFFFF);
-                    break;
-            }
-        }
-
-        Vector2 offset = v2_mulf(ent.sprite.size, -0.5f);
-        draw_image(ent.sprite.image, v2_add(ent.position, offset), ent.sprite.size, color);
-        
-        // cheat
-        if (ent.entity_type == ENTITY_player) {
-            Vector2 size = v2_mulf(v2(ent.radius, ent.radius), 2.0f);
-            offset = v2_mulf(size, -0.5f);
-            draw_circle(v2_add(ent.position, offset), size, hex_to_rgba(0xFFFFFF7F)); 
-        }
-    }
+    draw_world_map(true);
+    draw_entities(true);
 
     draw_frame.projection = m4_make_orthographic_projection(0, window.pixel_width, -window.pixel_height, 0, -1, 10); // topleft
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
@@ -664,9 +640,9 @@ void update_game_scene(void) {
             draw_text(font, tprintf("player health\t: %00d", ent.healths), 30, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
         }
 
-        if (ent.entity_type == ENTITY_enemy) {
-            draw_text(font, tprintf("enemy health\t: %00d", ent.healths), 30, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
-        }
+        //if (ent.entity_type == ENTITY_enemy) {
+        //    draw_text(font, tprintf("enemy health\t: %00d", ent.healths), 30, v2(0, -30 * offset_counter++), v2(1, 1), COLOR_WHITE);
+        //}
 
         if (offset_counter > 5) {
             break;
@@ -724,9 +700,6 @@ void game_late_init(void) {
     sprites[SPRITE_gold]      = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/items/gold.png"),        get_heap_allocator()), .size = v2(0.2, 0.2) };
     
     generator_init();
-
-
-    //os_sleep(1000); // loading kinda works
 }
 
 int entry(int argc, char **argv) {
@@ -740,7 +713,6 @@ int entry(int argc, char **argv) {
 
         now_time = os_get_current_time_in_seconds();
         delta_time = now_time - prew_time;
-
 
         switch (program_state) {
             case GAME_init: 
