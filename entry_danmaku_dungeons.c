@@ -72,7 +72,18 @@ void item_setup_gold(entity_t* entity) {
     entity->sprite = sprite_get(SPRITE_gold);
     entity->radius = entity->sprite.size.x / 2;
 }
+// @cleanup add function that converts world space
+// to map space. instead of all this get_flow get_block
+flow_t get_flow_by_world_coord(Vector2 position) {
+    position = v2_add(position, v2(MAP_WIDTH / 2, MAP_HEIGHT / 2)); 
+    
+    position = v2(clamp(position.x, 0, (f32)MAP_WIDTH), clamp(position.y, 0, (f32)MAP_HEIGHT));
 
+    s32 x = (s32)position.x;
+    s32 y = (s32)position.y;
+
+    return world->flow_map[x + y * MAP_WIDTH];
+}
 
 block_t get_block_by_world_coord(Vector2 position) {
     // @cleanup change this to something that related to current map. like gen_conf struct
@@ -281,10 +292,109 @@ void update_player(void) {
     }
 }
 
+flow_output_t get_max_value_from_neighbour(s32 xi, s32 yi) {
+    flow_output_t output = { 0, 0 };
+
+    for (s32 yo = -1; yo < 2; yo++) {
+        for (s32 xo = -1; xo < 2; xo++) {
+            s32 x = xo + xi;
+            s32 y = yo + yi;
+
+            if (yo == 0 && xo == 0) continue;
+            if ((yo != 0) && (xo != 0)) continue;
+
+            if (!(x >= 0 && x < MAP_WIDTH)) continue;
+            if (!(y >= 0 && y < MAP_HEIGHT)) continue;
+
+            if (world->flow_map[x + y * MAP_WIDTH].approach > output.approach)
+                output.approach = world->flow_map[x + y * MAP_WIDTH].approach;
+
+            if (world->flow_map[x + y * MAP_WIDTH].danger > output.danger)
+                output.danger   = world->flow_map[x + y * MAP_WIDTH].danger; 
+        }
+    }
+
+    return output;
+}
+
+void update_flow_tile(s32 i) {
+    flow_t current_tile = world->flow_map[i];
+    s32 x = i % MAP_WIDTH;
+    s32 y = i / MAP_WIDTH;
+
+    flow_output_t value = get_max_value_from_neighbour(x, y);
+
+    if (current_tile.approach > 0 || current_tile.approach < 0) {
+        world->temp_map[i].approach = current_tile.approach;
+    } else if (value.approach != 0) {
+        world->temp_map[i].approach = value.approach - 1;
+    }
+
+    if (current_tile.danger > 0 || current_tile.danger < 0) {
+        world->temp_map[i].danger = current_tile.danger;
+    } else if (value.danger != 0) {
+        world->temp_map[i].danger = value.danger - 1;
+    }
+}
+
+void update_flow_map(void) {
+    // clear 
+    // get position of player
+    // propogate flow map
+    // profit
+    
+    // clear
+    // @cleanup change this to something that related to current map. like gen_conf struct
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        world->flow_map[i] = (flow_t) { 0 };
+    }
+
+    // adding player and enemies
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* ent = &(world->entities[i]);
+        if (!ent->is_valid) continue;
+
+        Vector2 position = v2_add(ent->position, v2(MAP_WIDTH / 2, MAP_HEIGHT / 2)); 
+
+        position = v2(clamp(position.x, 0, (f32)MAP_WIDTH), clamp(position.y, 0, (f32)MAP_HEIGHT));
+
+        s32 index = ((s32)position.x) + ((s32)position.y) * MAP_WIDTH;
+
+        switch (ent->entity_type) {
+            case ENTITY_player: world->flow_map[index].approach = MAX_FLOW_DIST; break;
+            case ENTITY_enemy:  world->flow_map[index].danger   = MAX_FLOW_DIST; break;
+            default: break;
+        }
+
+        if (world->world_map[index].type == BLOCK_wall) {
+            world->flow_map[index].approach = -1;
+        }
+    }
+
+    for (size_t steps = 0; steps < MAX_FLOW_DIST; steps++) {
+        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++)
+            if (world->world_map[i].type == BLOCK_floor)
+                update_flow_tile(i);
+
+        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+            world->flow_map[i] = world->temp_map[i];
+            world->temp_map[i] = (flow_t){ 0 };
+        }
+    }
+}
+
 void update_enemy_state(entity_t* enemy) {
     if (enemy->healths < 0) {
         return;
     }
+
+    // movement
+    {
+        // based on timer
+        // we need to add Vector2 dest to a enemy. 
+        // And 
+    }
+
 
     entity_t* bullet_collision = check_collision_with_relevant_entities(enemy);
 
@@ -304,114 +414,7 @@ void update_enemy_state(entity_t* enemy) {
     bullet_collision->is_valid = false; 
 }
 
-output_flow_value_t get_max_value_from_neighbour(s32 xi, s32 yi) {
-    output_flow_value_t output = { 0, 0 };
-
-    for (s32 yo = -1; yo < 2; yo++) {
-        for (s32 xo = -1; xo < 2; xo++) {
-            s32 x = xo + xi;
-            s32 y = yo + yi;
-
-            if (yo == 0 && xo == 0) continue;
-            if ((yo != 0) && (xo != 0)) continue;
-
-            if (!(x >= 0 && x < MAP_WIDTH)) continue;
-            if (!(y >= 0 && y < MAP_HEIGHT)) continue;
-
-            if (world->flow_map[x + y * MAP_WIDTH].approach > output.approach)
-                output.approach = world->flow_map[x + y * MAP_WIDTH].approach;
-
-            if (world->flow_map[x + y * MAP_WIDTH].danger > output.danger)
-                output.danger = world->flow_map[x + y * MAP_WIDTH].danger; 
-        }
-    }
-
-    return output;
-}
-
-void update_flow_tile(s32 x, s32 y) {
-    tile_t tile = world->flow_map[x + y * MAP_WIDTH];
-    output_flow_value_t value = get_max_value_from_neighbour(x, y);
-
-    if (tile.approach > 0 || tile.approach < 0) {
-        world->temp_map[x + y * MAP_WIDTH].approach = tile.approach;
-    } else if (value.approach != 0) {
-        world->temp_map[x + y * MAP_WIDTH].approach = value.approach - 1;
-    }
-
-    if (tile.danger > 0 || tile.danger < 0) {
-        world->temp_map[x + y * MAP_WIDTH].danger = tile.danger;
-    } else if (value.danger != 0) {
-        world->temp_map[x + y * MAP_WIDTH].danger = value.danger - 1;
-    }
-}
-
-void update_flow_map(void) {
-    // clear 
-    // get position of player
-    // propogate flow map
-    // profit
-    
-    // clear
-    // @cleanup change this to something that related to current map. like gen_conf struct
-    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
-        world->flow_map[i] = (tile_t) { 0 };
-    }
-
-    // adding player and enemies
-    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
-        entity_t* ent = &(world->entities[i]);
-        if (!ent->is_valid) continue;
-
-        Vector2 position = v2_add(ent->position, v2(MAP_WIDTH / 2, MAP_HEIGHT / 2)); 
-
-        position = v2(clamp(position.x, 0, (f32)MAP_WIDTH), clamp(position.y, 0, (f32)MAP_HEIGHT));
-
-        s32 x = position.x;
-        s32 y = position.y;
-
-        switch (ent->entity_type) {
-            case ENTITY_player:
-                world->flow_map[x + y * MAP_WIDTH].approach = MAX_FLOW_DIST;
-                break;
-
-            case ENTITY_enemy:
-                world->flow_map[x + y * MAP_WIDTH].danger = MAX_FLOW_DIST;
-                break;
-
-            default:
-                break;
-        }
-
-        if (world->world_map[x + y * MAP_WIDTH].type == BLOCK_wall) {
-            world->flow_map[x + y * MAP_WIDTH].approach = -1;
-        }
-    }
-
-    // cellular automata step
-    // @cleanup
-    for (size_t steps = 0; steps < MAX_FLOW_DIST; steps++) {
-        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
-            s32 x = i % MAP_WIDTH;
-            s32 y = i / MAP_WIDTH;
-
-            if (world->world_map[x + y * MAP_WIDTH].type == BLOCK_floor)
-                update_flow_tile(x, y);
-        }
-
-        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
-            s32 x = i % MAP_WIDTH;
-            s32 y = i / MAP_WIDTH;
-
-            world->flow_map[x + y * MAP_WIDTH] = world->temp_map[x + y * MAP_WIDTH];
-            world->temp_map[x + y * MAP_WIDTH] = (tile_t){ 0 };
-        }
-    }
-}
-
 void update_enemies(void) {
-    // we need timer for update !! not every time
-
     if ((flow_update_timer + FLOW_UPDATE_INTERVAL) <= now_time) {
         flow_update_timer = now_time;
         update_flow_map();
@@ -552,9 +555,9 @@ void draw_world_map(bool optimize) {
         //color.g = (f32)world->flow_map[i].approach / (f32)MAX_FLOW_DIST;
         //color.r = (f32)world->flow_map[i].danger / (f32)MAX_FLOW_DIST;
 
-        color.r = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
-        color.g = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
-        color.b = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
+        color.r = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
+        color.g = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
+        color.b = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
 
         switch (world->world_map[i].type) {
             case BLOCK_floor: 
@@ -566,8 +569,10 @@ void draw_world_map(bool optimize) {
             default:
                 break;
         }
-
-        // draw_text(font, tprintf("%d", world->flow_map[i].approach), 30, position, v2(0.03, 0.03), COLOR_WHITE);
+    
+        // @debug
+        //if (world->flow_map[i].approach > 0)
+        //    draw_text(font, tprintf("%d", world->flow_map[i].approach), 30, position, v2(0.03, 0.03), COLOR_WHITE);
     }
 }
 

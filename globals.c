@@ -16,6 +16,7 @@ float64 delta_time = 0;
 entity_t* player_entity;
 
 Vector2 respawn_point;
+
 struct {
     Vector2 position;
     float32 scale;
