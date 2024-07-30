@@ -6,9 +6,12 @@
 #define PLAYER_BULLET_SPEED 20.0f
 #define BULLET_01_SPEED 2.0f
 #define SHOOT_INTERVAL 0.1f
+#define FLOW_UPDATE_INTERVAL 0.1f
 #define PLAYER_HEALTHS 3
 #define MAP_WIDTH 100
 #define MAP_HEIGHT 100
+
+#define MAX_FLOW_DIST 10
 
 #define MONEY_MOVE_SPEED 10.0f
 // bosses are like 100 - 1000
@@ -142,18 +145,12 @@ void scan_world_and_spawn_entitites(void) {
 bool check_collision_with_bullet(entity_t* bullet, entity_t* entity, circle_t bullet_circle, circle_t entity_circle) {
     switch (bullet->bullet_type) {
         case BULLET_player_01:
-            if (entity->entity_type != ENTITY_enemy) 
-                return false;
-
             if (check_collision_circle_to_circle(bullet_circle, entity_circle))
-                return true;
+                return entity->entity_type == ENTITY_enemy;
             break;
         case BULLET_enemy_01:
-            if (entity->entity_type != ENTITY_player)
-                return false;
-
             if (check_collision_circle_to_circle(bullet_circle, entity_circle))
-                return true;
+                return entity->entity_type == ENTITY_player;
             break;
     }
 
@@ -307,7 +304,119 @@ void update_enemy_state(entity_t* enemy) {
     bullet_collision->is_valid = false; 
 }
 
+output_flow_value_t get_max_value_from_neighbour(s32 xi, s32 yi) {
+    output_flow_value_t output = { 0, 0 };
+
+    for (s32 yo = -1; yo < 2; yo++) {
+        for (s32 xo = -1; xo < 2; xo++) {
+            s32 x = xo + xi;
+            s32 y = yo + yi;
+
+            if (yo == 0 && xo == 0) continue;
+            if ((yo != 0) && (xo != 0)) continue;
+
+            if (!(x >= 0 && x < MAP_WIDTH)) continue;
+            if (!(y >= 0 && y < MAP_HEIGHT)) continue;
+
+            if (world->flow_map[x + y * MAP_WIDTH].approach > output.approach)
+                output.approach = world->flow_map[x + y * MAP_WIDTH].approach;
+
+            if (world->flow_map[x + y * MAP_WIDTH].danger > output.danger)
+                output.danger = world->flow_map[x + y * MAP_WIDTH].danger; 
+        }
+    }
+
+    return output;
+}
+
+void update_flow_tile(s32 x, s32 y) {
+    tile_t tile = world->flow_map[x + y * MAP_WIDTH];
+    output_flow_value_t value = get_max_value_from_neighbour(x, y);
+
+    if (tile.approach > 0 || tile.approach < 0) {
+        world->temp_map[x + y * MAP_WIDTH].approach = tile.approach;
+    } else if (value.approach != 0) {
+        world->temp_map[x + y * MAP_WIDTH].approach = value.approach - 1;
+    }
+
+    if (tile.danger > 0 || tile.danger < 0) {
+        world->temp_map[x + y * MAP_WIDTH].danger = tile.danger;
+    } else if (value.danger != 0) {
+        world->temp_map[x + y * MAP_WIDTH].danger = value.danger - 1;
+    }
+}
+
+void update_flow_map(void) {
+    // clear 
+    // get position of player
+    // propogate flow map
+    // profit
+    
+    // clear
+    // @cleanup change this to something that related to current map. like gen_conf struct
+    for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+        world->flow_map[i] = (tile_t) { 0 };
+    }
+
+    // adding player and enemies
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* ent = &(world->entities[i]);
+        if (!ent->is_valid) continue;
+
+        Vector2 position = v2_add(ent->position, v2(MAP_WIDTH / 2, MAP_HEIGHT / 2)); 
+
+        position = v2(clamp(position.x, 0, (f32)MAP_WIDTH), clamp(position.y, 0, (f32)MAP_HEIGHT));
+
+        s32 x = position.x;
+        s32 y = position.y;
+
+        switch (ent->entity_type) {
+            case ENTITY_player:
+                world->flow_map[x + y * MAP_WIDTH].approach = MAX_FLOW_DIST;
+                break;
+
+            case ENTITY_enemy:
+                world->flow_map[x + y * MAP_WIDTH].danger = MAX_FLOW_DIST;
+                break;
+
+            default:
+                break;
+        }
+
+        if (world->world_map[x + y * MAP_WIDTH].type == BLOCK_wall) {
+            world->flow_map[x + y * MAP_WIDTH].approach = -1;
+        }
+    }
+
+    // cellular automata step
+    // @cleanup
+    for (size_t steps = 0; steps < MAX_FLOW_DIST; steps++) {
+        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+            s32 x = i % MAP_WIDTH;
+            s32 y = i / MAP_WIDTH;
+
+            if (world->world_map[x + y * MAP_WIDTH].type == BLOCK_floor)
+                update_flow_tile(x, y);
+        }
+
+        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+            s32 x = i % MAP_WIDTH;
+            s32 y = i / MAP_WIDTH;
+
+            world->flow_map[x + y * MAP_WIDTH] = world->temp_map[x + y * MAP_WIDTH];
+            world->temp_map[x + y * MAP_WIDTH] = (tile_t){ 0 };
+        }
+    }
+}
+
 void update_enemies(void) {
+    // we need timer for update !! not every time
+
+    if ((flow_update_timer + FLOW_UPDATE_INTERVAL) <= now_time) {
+        flow_update_timer = now_time;
+        update_flow_map();
+    }
+
     for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t* enemy = &(world->entities[i]);
         if (!enemy->is_valid) continue;
@@ -368,7 +477,6 @@ void update_enemies(void) {
                 bullet->direction = v2(x, y);
             }
         }
-
         // move & shoot here!
     }
 }
@@ -413,18 +521,15 @@ void update_items(void) {
         if (!item->is_valid) continue;
         if (!(item->entity_type == ENTITY_item)) continue;
 
-        // each bullet has its unique movement pattern, but not right now as you see
-        switch (item->item_type) { 
-            case ITEM_gold:
-                Vector2 position = v2_sub(item->position, player_entity->position);
-                f32 angle = atan2f(position.y, position.x);
+        Vector2 position = v2_sub(item->position, player_entity->position);
 
-                item->position.x -= cosf(angle) * MONEY_MOVE_SPEED * delta_time;
-                item->position.y -= sinf(angle) * MONEY_MOVE_SPEED * delta_time;
-                break;
-            default: 
-                break;
-        }
+        if (v2_magn_greater_than(position, MAX_DIST_TO_PLAYER / 5))
+            continue;
+
+        f32 angle = atan2f(position.y, position.x);
+
+        item->position.x -= cosf(angle) * MONEY_MOVE_SPEED * delta_time;
+        item->position.y -= sinf(angle) * MONEY_MOVE_SPEED * delta_time;
     }
 }
 
@@ -437,14 +542,23 @@ void draw_world_map(bool optimize) {
         Vector2 position = v2_sub(v2(x, y), v2(MAP_WIDTH / 2, MAP_HEIGHT / 2));
 
         if (optimize) {
-            if (v2_sqr_dist(player_entity->position, position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER)) {
+            if (v2_dist_to_greater_than(player_entity->position, position, MAX_DIST_TO_PLAYER)) {
                 continue;
             }
         }
 
+        Vector4 color = hex_to_rgba(0x3f3f3fff);
+
+        //color.g = (f32)world->flow_map[i].approach / (f32)MAX_FLOW_DIST;
+        //color.r = (f32)world->flow_map[i].danger / (f32)MAX_FLOW_DIST;
+
+        color.r = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
+        color.g = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
+        color.b = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST);
+
         switch (world->world_map[i].type) {
             case BLOCK_floor: 
-                draw_rect(position, v2(1, 1), hex_to_rgba(0x3f3f3fff));
+                draw_rect(position, v2(1, 1), color);
                 break;
             case BLOCK_wall: 
                 draw_rect(position, v2(1, 1), hex_to_rgba(0x7f7f7fff));
@@ -452,6 +566,8 @@ void draw_world_map(bool optimize) {
             default:
                 break;
         }
+
+        // draw_text(font, tprintf("%d", world->flow_map[i].approach), 30, position, v2(0.03, 0.03), COLOR_WHITE);
     }
 }
 
@@ -462,7 +578,7 @@ void draw_entities(bool optimize) {
         if (!ent.is_valid) continue;
 
         if (optimize) {
-            if (v2_sqr_dist(player_entity->position, ent.position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER)) {
+            if (v2_dist_to_greater_than(player_entity->position, ent.position, MAX_DIST_TO_PLAYER)) {
                 continue;
             }
         }

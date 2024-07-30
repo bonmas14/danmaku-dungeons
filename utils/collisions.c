@@ -25,6 +25,14 @@ float32 v2_sqr_dist(Vector2 a, Vector2 b) {
     return v2_sqr_magn(v2_sub(a, b));
 }
 
+bool v2_dist_to_greater_than(Vector2 a, Vector2 b, float32 value) {
+    return v2_sqr_dist(a, b) > (value * value);
+}
+
+bool v2_magn_greater_than(Vector2 a, float32 value) {
+    return v2_sqr_magn(a) > (value * value);
+}
+
 bool check_collision_circle_to_circle(circle_t a, circle_t b) {
     return v2_sqr_dist(a.position, b.position) < (a.radius * a.radius + b.radius * b.radius);
 }

@@ -86,8 +86,20 @@ typedef struct block_t {
     entity_prototype_t prototype;
 } block_t;
 
+typedef struct tile_t {
+    s32 approach;
+    s32 danger; // for player (makes ai more aggressive)
+} tile_t;
+
 typedef struct world_t {
     entity_t entities[MAX_ENTITY_COUNT];
 
     block_t world_map[MAP_WIDTH * MAP_HEIGHT];
+    tile_t flow_map[MAP_WIDTH * MAP_HEIGHT];
+    tile_t temp_map[MAP_WIDTH * MAP_HEIGHT];
 } world_t;
+
+typedef struct output_flow_value_t {
+    s32 approach;
+    s32 danger;
+} output_flow_value_t;
