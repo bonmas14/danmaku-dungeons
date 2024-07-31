@@ -17,6 +17,8 @@
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
+#define TILEMAP_PIXEL_SIZE (1.0 / 72.0)
+
 #include "game_structures.c"
 #include "globals.c"
 #include "world_generation.c"
@@ -491,8 +493,14 @@ void update_bullets(void) {
         switch (bullet->bullet_type) { 
             case BULLET_enemy_01:
             case BULLET_player_01:
-                Vector2 position = v2_add(bullet->position, v2_mulf(bullet->direction, bullet->movement_speed * delta_time));
+                Vector2 position = v2_mulf(bullet->direction, bullet->movement_speed * delta_time);
+                position = v2_add(position, bullet->position);
 
+                // @todo 
+                // we need to check direction of block after, 
+                // and change collider a bit if it is pointing upwards. 
+                // this is because our upwards blocks are not full, 
+                // and bullet can and should move throught them
                 if (get_block_by_world_coord(position).type == BLOCK_wall) {
                     bullet->is_valid = false;
                 } else {
@@ -528,6 +536,8 @@ void update_items(void) {
 
 // @cleanup change MAP_WIDTH MAP_HEIGHT this to something that related to current map. like gen_conf struct
 void draw_world_map(bool optimize) {
+    Vector2 pixel_size = v2(TILEMAP_PIXEL_SIZE, TILEMAP_PIXEL_SIZE);
+
     for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
         int32_t x = i % MAP_WIDTH;
         int32_t y = i / MAP_WIDTH;
@@ -540,25 +550,34 @@ void draw_world_map(bool optimize) {
             }
         }
 
-        Vector4 color = hex_to_rgba(0x3f3f3fff);
-
+        Vector4 color = hex_to_rgba(0xffffffff);
         //color.g = (f32)world->flow_map[i].approach / (f32)MAX_FLOW_DIST;
         //color.r = (f32)world->flow_map[i].danger / (f32)MAX_FLOW_DIST;
 
-        color.r = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
-        color.g = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
-        color.b = ((f32)world->flow_map[i].approach * (f32)world->flow_map[i].danger) / ((f32)MAX_FLOW_DIST * (f32)MAX_FLOW_DIST) / 2.0;
+        Draw_Quad* quad = draw_image(tiles, position, v2(1, 1), color);
 
+        Vector4 uv;
+        //quad->has_scissor = true;
         switch (world->world_map[i].type) {
-            case BLOCK_floor: 
-                draw_rect(position, v2(1, 1), color);
-                break;
             case BLOCK_wall: 
-                draw_rect(position, v2(1, 1), hex_to_rgba(0x7f7f7fff));
+                // check if its on side
+                // bottom left btw
+                uv.xy = v2_add(v2(1.0 / 4.0, 3.0 / 4.0), pixel_size);
+                uv.zw = v2_sub(v2(2.0 / 4.0, 4.0 / 4.0), pixel_size);
+                break;
+            case BLOCK_floor: 
+                // check if its on side
+                // bottom left btw
+                uv.xy = v2_add(v2(3.0 / 4.0, 3.0 / 4.0), pixel_size);
+                uv.zw = v2_sub(v2(4.0 / 4.0, 4.0 / 4.0), pixel_size);
                 break;
             default:
+                uv.xy = v2_add(v2(1.0 / 4.0, 2.0 / 4.0), pixel_size);
+                uv.zw = v2_sub(v2(2.0 / 4.0, 3.0 / 4.0), pixel_size);
                 break;
         }
+
+        quad->uv = uv;
     
         // @debug
         //if (world->flow_map[i].approach > 0)
@@ -816,6 +835,8 @@ void game_late_init(void) {
     impact_player->release_when_done = false;
     menu_music_player->position = v3(0, 0, 0);
     menu_music_player->release_when_done = false;
+
+    tiles = load_image_from_disk(STR("res/graphics/tiles/tilemap_world_01.png"), get_heap_allocator());
 
     sprites[SPRITE_error]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"),             get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_player]    = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };

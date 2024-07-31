@@ -340,4 +340,10 @@ void generate_map(void) {
             }
         }
     }
+
+    // @todo
+    // cellular automata step to fill all emply cells and give proper directions for blocks!
+    for (size_t i = 0; i < (gen_conf.map_width * gen_conf.map_height); i++) {
+        break;
+    }
 }

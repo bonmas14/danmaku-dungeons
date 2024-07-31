@@ -39,6 +39,17 @@ typedef enum block_archetype_t {
     BLOCK_MAX,
 } block_archetype_t;
 
+typedef enum block_direction_t {
+    DIRECTION_none,
+    DIRECTION_up_left,
+    DIRECTION_up,
+    DIRECTION_up_right,
+
+    DIRECTION_center_left,
+    DIRECTION_center,
+    DIRECTION_center_right,
+} block_direction_t;
+
 typedef enum game_state_t {
     GAME_init,
     GAME_menu,
@@ -83,6 +94,7 @@ typedef struct entity_prototype_t {
 
 typedef struct block_t {
     block_archetype_t type;
+    block_direction_t direction;
     entity_prototype_t prototype;
 } block_t;
 
