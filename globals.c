@@ -1,5 +1,6 @@
 Audio_Player* menu_music_player;
 Audio_Player* impact_player;
+Audio_Source impact_source;
 
 Gfx_Image* load_screen = 0;
 Gfx_Image* tiles = 0;

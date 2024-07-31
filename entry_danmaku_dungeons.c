@@ -17,7 +17,16 @@
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
-#define TILEMAP_PIXEL_SIZE (1.0 / 72.0)
+#define TILE_SIZE 18.0
+#define TILEMAP_SIZE 4.0
+#define TILEMAP_PIXEL_SIZE v2(1.0 / (TILE_SIZE * TILEMAP_SIZE), 1.0 / (TILE_SIZE * TILEMAP_SIZE))
+
+// MACRO POWER
+#define TILE_START(x, y) v2_expand(v2_add(v2((x / 4.0), y / 4.0), TILEMAP_PIXEL_SIZE))
+#define TILE_STOP(x, y)  v2_expand(v2_sub(v2((x + 1.0) / 4.0, (y + 1.0) / 4.0), TILEMAP_PIXEL_SIZE))
+
+#define TILE_FLOOR v4(TILE_START(3.0, 3.0), TILE_STOP(3.0, 3.0))
+#define TILE_VOID  v4(TILE_START(1.0, 2.0), TILE_STOP(1.0, 2.0))
 
 #include "game_structures.c"
 #include "globals.c"
@@ -277,9 +286,10 @@ void update_player(void) {
             // audio_player_is_finished 
             //
             // @audio_issue
-            if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
-                audio_player_set_progression_factor(impact_player, 0);
-            }
+            // if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
+            //     audio_player_set_progression_factor(impact_player, 0);
+            // }
+            play_one_audio_clip_source(impact_source);
 
             collision->is_valid = 0;
             break;
@@ -398,9 +408,12 @@ void update_enemy_state(entity_t* enemy) {
     if (bullet_collision == 0) return;
 
     // @audio_issue
-    if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
-        audio_player_set_progression_factor(impact_player, 0);
-    }
+    
+    //if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
+    //    audio_player_set_progression_factor(impact_player, 0);
+    //}
+    
+    play_one_audio_clip_source(impact_source);
 
     enemy->healths -= 1;
     bullet_collision->is_valid = false; 
@@ -536,7 +549,7 @@ void update_items(void) {
 
 // @cleanup change MAP_WIDTH MAP_HEIGHT this to something that related to current map. like gen_conf struct
 void draw_world_map(bool optimize) {
-    Vector2 pixel_size = v2(TILEMAP_PIXEL_SIZE, TILEMAP_PIXEL_SIZE);
+    Vector2 pixel_size = TILEMAP_PIXEL_SIZE;
 
     for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
         int32_t x = i % MAP_WIDTH;
@@ -558,6 +571,7 @@ void draw_world_map(bool optimize) {
 
         Vector4 uv;
         //quad->has_scissor = true;
+        
         switch (world->world_map[i].type) {
             case BLOCK_wall: 
                 // check if its on side
@@ -566,14 +580,10 @@ void draw_world_map(bool optimize) {
                 uv.zw = v2_sub(v2(2.0 / 4.0, 4.0 / 4.0), pixel_size);
                 break;
             case BLOCK_floor: 
-                // check if its on side
-                // bottom left btw
-                uv.xy = v2_add(v2(3.0 / 4.0, 3.0 / 4.0), pixel_size);
-                uv.zw = v2_sub(v2(4.0 / 4.0, 4.0 / 4.0), pixel_size);
+                uv = TILE_FLOOR;
                 break;
             default:
-                uv.xy = v2_add(v2(1.0 / 4.0, 2.0 / 4.0), pixel_size);
-                uv.zw = v2_sub(v2(2.0 / 4.0, 3.0 / 4.0), pixel_size);
+                uv = TILE_VOID;
                 break;
         }
 
@@ -813,15 +823,16 @@ void game_late_init(void) {
     //font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
     font = load_font_from_disk(STR("res/fonts/arial.ttf"), get_heap_allocator());
 
-    Audio_Source source = { 0 };
+    impact_source = (Audio_Source) { 0 };
     impact_player = audio_player_get_one();
     menu_music_player = audio_player_get_one();
 
     // @audio_issue
-    audio_open_source_stream(&source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
-    audio_player_set_source(impact_player, source, false);
-    audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
+    // audio_player_set_source(impact_player, source, false);
+    // audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
+    audio_open_source_stream(&impact_source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
 
+    Audio_Source source = { 0 };
     audio_open_source_stream(&source, STR("res/audio/music/menu.wav"), get_heap_allocator());
     // audio_open_source_stream(&source, STR("res/audio/music/loop.wav"), get_heap_allocator());
     // @audio_issue works once with loop. secound time it stops
