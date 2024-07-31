@@ -1,6 +1,6 @@
 Gfx_Image* load_screen = 0;
 Gfx_Font* font = 0;
-
+Audio_Player* menu_music_player;
 Audio_Player* impact_player;
 
 sprite_t sprites[SPRITE_MAX];

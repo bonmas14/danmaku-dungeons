@@ -232,7 +232,6 @@ void player_shoot(entity_t* player) {
 void update_player(void) {
     if (player_entity->healths < 0) {
         player_entity->is_valid = false;
-        
         program_state = GAME_menu;
         return;
     }
@@ -273,17 +272,13 @@ void update_player(void) {
             player_entity->position = respawn_point;
             break;
         case ENTITY_item:
-            // add item, play sound
-            { // audio_player_is_finished 
-                spinlock_acquire_or_wait(&impact_player->sample_lock);
-                assert(impact_player->frame_index <= impact_player->source.number_of_frames);
-
-                if (impact_player->frame_index == impact_player->source.number_of_frames)
-                    impact_player->frame_index = 0;
-
-                spinlock_release(&impact_player->sample_lock);
-
+            // audio_player_is_finished 
+            //
+            // @audio_issue
+            if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
+                audio_player_set_progression_factor(impact_player, 0);
             }
+
             collision->is_valid = 0;
             break;
 
@@ -400,14 +395,9 @@ void update_enemy_state(entity_t* enemy) {
 
     if (bullet_collision == 0) return;
 
-    { // audio_player_is_finished 
-        spinlock_acquire_or_wait(&impact_player->sample_lock);
-        assert(impact_player->frame_index <= impact_player->source.number_of_frames);
-
-        if (impact_player->frame_index == impact_player->source.number_of_frames)
-            impact_player->frame_index = 0;
-
-        spinlock_release(&impact_player->sample_lock);
+    // @audio_issue
+    if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
+        audio_player_set_progression_factor(impact_player, 0);
     }
 
     enemy->healths -= 1;
@@ -627,7 +617,6 @@ void update_menu(void) {
         camera.scale = CAMERA_SCALE;
         program_state = GAME_scene;
     }
-
  
     float64 scale = camera.scale;
 
@@ -643,6 +632,7 @@ void update_menu(void) {
     draw_text(font, STR("You're in game menu. \nPress SPACE to start\nPress ESC to exit"), 30, v2(0, -window.pixel_height / 2), v2(1, 1), COLOR_WHITE);
     draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
 }
+
 void update_editor(void) {
     reset_draw_frame(&draw_frame);
 
@@ -806,13 +796,26 @@ void game_late_init(void) {
 
     Audio_Source source = { 0 };
     impact_player = audio_player_get_one();
+    menu_music_player = audio_player_get_one();
 
+    // @audio_issue
     audio_open_source_stream(&source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
     audio_player_set_source(impact_player, source, false);
     audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
 
+    audio_open_source_stream(&source, STR("res/audio/music/menu.wav"), get_heap_allocator());
+    // audio_open_source_stream(&source, STR("res/audio/music/loop.wav"), get_heap_allocator());
+    // @audio_issue works once with loop. secound time it stops
+
+    audio_player_set_source(menu_music_player, source, true);
+    audio_player_set_state(menu_music_player, AUDIO_PLAYER_STATE_PLAYING);
+    // @audio_issue
+    audio_player_set_looping(menu_music_player, true);
+
     impact_player->position = v3(0, 0, 0);
     impact_player->release_when_done = false;
+    menu_music_player->position = v3(0, 0, 0);
+    menu_music_player->release_when_done = false;
 
     sprites[SPRITE_error]     = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/error.png"),             get_heap_allocator()), .size = v2(1, 1) };
     sprites[SPRITE_player]    = (sprite_t) {.image = load_image_from_disk(STR("res/graphics/players/player_01.png"), get_heap_allocator()), .size = v2(1, 1) };
