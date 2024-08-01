@@ -41,13 +41,17 @@ typedef enum block_archetype_t {
 
 typedef enum block_direction_t {
     DIRECTION_none,
-    DIRECTION_up_left,
-    DIRECTION_up,
-    DIRECTION_up_right,
-
-    DIRECTION_center_left,
     DIRECTION_center,
-    DIRECTION_center_right,
+
+    DIRECTION_left,
+    DIRECTION_right,
+    DIRECTION_up,
+    DIRECTION_down,
+
+    DIRECTION_up_left,
+    DIRECTION_up_right,
+    DIRECTION_down_left,
+    DIRECTION_down_right,
 } block_direction_t;
 
 typedef enum game_state_t {

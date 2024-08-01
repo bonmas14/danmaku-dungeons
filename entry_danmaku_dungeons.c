@@ -17,16 +17,34 @@
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
 
+// MACRO POWER
 #define TILE_SIZE 18.0
 #define TILEMAP_SIZE 4.0
 #define TILEMAP_PIXEL_SIZE v2(1.0 / (TILE_SIZE * TILEMAP_SIZE), 1.0 / (TILE_SIZE * TILEMAP_SIZE))
 
-// MACRO POWER
-#define TILE_START(x, y) v2_expand(v2_add(v2((x / 4.0), y / 4.0), TILEMAP_PIXEL_SIZE))
-#define TILE_STOP(x, y)  v2_expand(v2_sub(v2((x + 1.0) / 4.0, (y + 1.0) / 4.0), TILEMAP_PIXEL_SIZE))
+#define TILE_START(x, y) v2_expand(v2_add(v2((x / TILEMAP_SIZE), y / TILEMAP_SIZE), TILEMAP_PIXEL_SIZE))
+#define TILE_STOP(x, y)  v2_expand(v2_sub(v2((x + 1.0) / TILEMAP_SIZE, (y + 1.0) / TILEMAP_SIZE), TILEMAP_PIXEL_SIZE))
 
-#define TILE_FLOOR v4(TILE_START(3.0, 3.0), TILE_STOP(3.0, 3.0))
-#define TILE_VOID  v4(TILE_START(1.0, 2.0), TILE_STOP(1.0, 2.0))
+#define TILE(x, y) v4(TILE_START(x, y), TILE_STOP(x, y))
+
+#define TILE_WALL_TL TILE(0.0, 3.0)
+#define TILE_WALL_TC TILE(1.0, 3.0)
+#define TILE_WALL_TR TILE(2.0, 3.0)
+
+#define TILE_WALL_CL TILE(0.0, 2.0)
+#define TILE_WALL_CR TILE(2.0, 2.0)
+
+#define TILE_WALL_BL TILE(0.0, 1.0)
+#define TILE_WALL_BC TILE(1.0, 1.0)
+#define TILE_WALL_BR TILE(2.0, 1.0)
+
+#define TILE_FLOOR TILE(3.0, 3.0)
+#define TILE_VOID  TILE(1.0, 2.0)
+
+#define TILE_VOID_CORNER_TL TILE(0.0, 0.0)
+#define TILE_VOID_CORNER_TR TILE(1.0, 0.0)
+#define TILE_VOID_CORNER_BL TILE(2.0, 0.0)
+#define TILE_VOID_CORNER_BR TILE(3.0, 0.0)
 
 #include "game_structures.c"
 #include "globals.c"
@@ -547,6 +565,126 @@ void update_items(void) {
     }
 }
 
+Vector4 get_wallvoid_uv_with_direciton(block_direction_t direction) {
+    switch (direction) {
+        case DIRECTION_up_left:
+            return TILE_VOID_CORNER_TL;
+        case DIRECTION_up_right:
+            return TILE_VOID_CORNER_TR;
+        case DIRECTION_down_left:
+            return TILE_VOID_CORNER_BL;
+        case DIRECTION_down_right:
+            return TILE_VOID_CORNER_BR;
+
+        case DIRECTION_none:
+        case DIRECTION_center:
+        default:
+            return TILE_VOID;
+    }
+}
+Vector4 get_wall_uv_with_direction(block_direction_t direction) {
+    switch (direction) {
+        case DIRECTION_left:
+            return TILE_WALL_CL;
+        case DIRECTION_right:
+            return TILE_WALL_CR;
+        case DIRECTION_up:
+            return TILE_WALL_TC;
+        case DIRECTION_down:
+            return TILE_WALL_BC;
+
+        case DIRECTION_up_left:
+            return TILE_WALL_TL;
+        case DIRECTION_up_right:
+            return TILE_WALL_TR;
+        case DIRECTION_down_left:
+            return TILE_WALL_BL;
+        case DIRECTION_down_right:
+            return TILE_WALL_BR;
+
+        case DIRECTION_none:
+        case DIRECTION_center:
+        default:
+            return TILE_VOID;
+    }
+}
+
+Vector4 get_block_uv_with_direction(size_t index) {
+    size_t xi = index % MAP_WIDTH;
+    size_t yi = index / MAP_WIDTH;
+
+    s32 left = 0, right = 0, top = 0, down = 0;
+
+    block_direction_t dir = DIRECTION_none;
+
+    // find direction where theres no wall but not void
+    //
+    // we have 4 directions for example.
+    // we have 4 vars that increment if theres floor on this cell
+    // we set direction to be the highest var.
+    // if one of two are equal it means that we have subdirections
+    for (s32 y = -1; y <= 1; y++) {
+        for (s32 x = -1; x <= 1; x++) {
+            s32 xo = x + xi;
+            s32 yo = y + yi;
+            
+            if (xo < 0 || yo < 0 || xo >= MAP_WIDTH || yo >= MAP_HEIGHT) continue;
+
+            if (world->world_map[xo + yo * MAP_WIDTH].type != BLOCK_floor) continue;
+
+            if (y == -1) top++; else if (y == 1) down++;
+            if (x == -1) left++; else if (x == 1) right++;
+        }
+    }
+    bool corner_wall = false;
+    // kinda works but be need to process all DIRECTION_center after, to make proper "VOID" tiles
+    if ((left - right) > 1) {
+        if ((top - down) < -1)     dir = DIRECTION_up_left;
+        else if ((top - down) > 1) dir = DIRECTION_down_left;
+        else                       dir = DIRECTION_left;
+    } else if ((left - right) < -1) {
+        if ((top - down) < -1)     dir = DIRECTION_up_right;
+        else if ((top - down) > 1) dir = DIRECTION_down_right;
+        else                       dir = DIRECTION_right;
+    } else {
+        if ((top - down) < -1)     dir = DIRECTION_up;
+        else if ((top - down) > 1) dir = DIRECTION_down;
+        else                       dir = DIRECTION_center;
+    }
+
+    if (dir == DIRECTION_center) {
+        corner_wall = true;
+        if (left < right) {
+            if (top > down)      dir = DIRECTION_up_left;
+            else if (top < down) dir = DIRECTION_down_left;
+            else                 dir = DIRECTION_left;
+        } else if (left > right) {
+            if (top > down)      dir = DIRECTION_up_right;
+            else if (top < down) dir = DIRECTION_down_right;
+            else                 dir = DIRECTION_right;
+        } else {
+            if (top > down)      dir = DIRECTION_up;
+            else if (top < down) dir = DIRECTION_down;
+            else                 dir = DIRECTION_center;
+        }
+    }
+
+    switch (world->world_map[index].type) {
+        case BLOCK_wall: 
+            if (corner_wall) 
+                return get_wallvoid_uv_with_direciton(dir);
+            return get_wall_uv_with_direction(dir);
+        case BLOCK_floor: 
+            return TILE_FLOOR;
+        case BLOCK_empty: 
+            return TILE_VOID;
+        default:
+            return TILE_VOID;
+    }
+
+    return TILE_VOID;
+}
+
 // @cleanup change MAP_WIDTH MAP_HEIGHT this to something that related to current map. like gen_conf struct
 void draw_world_map(bool optimize) {
     Vector2 pixel_size = TILEMAP_PIXEL_SIZE;
@@ -557,10 +695,8 @@ void draw_world_map(bool optimize) {
 
         Vector2 position = v2_sub(v2(x, y), v2(MAP_WIDTH / 2, MAP_HEIGHT / 2));
 
-        if (optimize) {
-            if (v2_dist_to_greater_than(player_entity->position, position, MAX_DIST_TO_PLAYER)) {
-                continue;
-            }
+        if (optimize && v2_dist_to_greater_than(player_entity->position, position, MAX_DIST_TO_PLAYER)) {
+            continue;
         }
 
         Vector4 color = hex_to_rgba(0xffffffff);
@@ -569,25 +705,7 @@ void draw_world_map(bool optimize) {
 
         Draw_Quad* quad = draw_image(tiles, position, v2(1, 1), color);
 
-        Vector4 uv;
-        //quad->has_scissor = true;
-        
-        switch (world->world_map[i].type) {
-            case BLOCK_wall: 
-                // check if its on side
-                // bottom left btw
-                uv.xy = v2_add(v2(1.0 / 4.0, 3.0 / 4.0), pixel_size);
-                uv.zw = v2_sub(v2(2.0 / 4.0, 4.0 / 4.0), pixel_size);
-                break;
-            case BLOCK_floor: 
-                uv = TILE_FLOOR;
-                break;
-            default:
-                uv = TILE_VOID;
-                break;
-        }
-
-        quad->uv = uv;
+        quad->uv = get_block_uv_with_direction(i);
     
         // @debug
         //if (world->flow_map[i].approach > 0)

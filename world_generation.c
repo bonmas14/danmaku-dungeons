@@ -243,15 +243,16 @@ void generator_draw_room(aabb_room_t room) {
                 continue;
 
             block_t block = { .type = BLOCK_floor };
+            block_t curr = world->world_map[x + y * gen_conf.map_width];
 
             if (x == start_x || x == (end_x - 1)) {
-                if (world->world_map[x + y * gen_conf.map_width].type == BLOCK_empty) {
+                if (curr.type == BLOCK_empty || curr.type == BLOCK_wall) {
                     block.type = BLOCK_wall;
                 }
             }
 
             if (y == start_y || y == (end_y - 1)) {
-                if (world->world_map[x + y * gen_conf.map_width].type == BLOCK_empty) {
+                if (curr.type == BLOCK_empty || curr.type == BLOCK_wall) {
                     block.type = BLOCK_wall;
                 }
             }
