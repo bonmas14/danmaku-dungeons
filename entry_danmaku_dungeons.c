@@ -870,10 +870,10 @@ void update_game_scene(void) {
     draw_frame.view = m4_make_translation(v3(camera.position.x, camera.position.y, 0));
     draw_frame.view = m4_scale(draw_frame.view, v3(scale, scale, scale));
 
+    update_player();
+    update_enemies();
     update_items();
     update_bullets();
-    update_enemies();
-    update_player();
 
     if (is_key_just_pressed(KEY_ESCAPE)) {
         program_state = GAME_menu;
