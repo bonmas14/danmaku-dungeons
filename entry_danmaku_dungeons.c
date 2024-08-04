@@ -227,10 +227,17 @@ entity_t* check_collision_with_relevant_entities(entity_t* entity) {
 }
 
 void player_shoot(entity_t* player) {
+    size_t count = 3; // defined by player power up
+                      
+    if ((shoot_audio_timer + SHOOT_INTERVAL / 3) < now_time) {
+        shoot_audio_timer = now_time;
+
+        shoot_player->config.playback_speed = get_random_float64_in_range(0.80, 1.1);
+        audio_player_set_progression_factor(shoot_player, 0);
+    }
+                      
     if ((player->timer + SHOOT_INTERVAL) < now_time) {
         player->timer = now_time;
-
-        size_t count = 3; // defined by player power up
 
         Vector2 position = screen_to_world(v2(input_frame.mouse_x, input_frame.mouse_y), v2(window.width, window.height), draw_frame);
 
@@ -301,13 +308,8 @@ void update_player(void) {
             player_entity->position = respawn_point;
             break;
         case ENTITY_item:
-            // audio_player_is_finished 
-            //
-            // @audio_issue
-            // if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
-            //     audio_player_set_progression_factor(impact_player, 0);
-            // }
-            play_one_audio_clip_source(impact_source);
+            collect_player->config.playback_speed = get_random_float64_in_range(0.95, 1.05);
+            audio_player_set_progression_factor(collect_player, 0);
 
             collision->is_valid = 0;
             break;
@@ -425,13 +427,8 @@ void update_enemy_state(entity_t* enemy) {
 
     if (bullet_collision == 0) return;
 
-    // @audio_issue
-    
-    //if (audio_player_get_current_progression_factor(impact_player) == 1.0) {
-    //    audio_player_set_progression_factor(impact_player, 0);
-    //}
-    
-    play_one_audio_clip_source(impact_source);
+    impact_player->config.playback_speed = get_random_float64_in_range(0.85, 1.15);
+    audio_player_set_progression_factor(impact_player, 0);
 
     enemy->healths -= 1;
     bullet_collision->is_valid = false; 
@@ -515,9 +512,13 @@ void update_bullets(void) {
         if (!bullet->is_valid) continue;
         if (!(bullet->entity_type == ENTITY_bullet)) continue;
         
-        if (bullet->timer > 10.0 || !bullet->shoot_by->is_valid) {
+        if (bullet->timer > 10.0 ) {
             bullet->is_valid = false;
             continue;
+        }
+        if (!bullet->shoot_by->is_valid) {
+            entity_setup_item(bullet);
+            item_setup_gold(bullet);
         }
 
         // each bullet has its unique movement pattern, but not right now as you see
@@ -927,7 +928,7 @@ void game_early_init(void) {
     window.scaled_height = 720; 
     //window.enable_vsync = true;
 
-    window.clear_color = hex_to_rgba(0x0f0f0fff);
+    window.clear_color = hex_to_rgba(0x000000ff);
 
     camera.scale = CAMERA_SCALE;
 
@@ -941,29 +942,52 @@ void game_late_init(void) {
     //font = load_font_from_disk(STR("res/fonts/jacquard.ttf"), get_heap_allocator());
     font = load_font_from_disk(STR("res/fonts/arial.ttf"), get_heap_allocator());
 
-    impact_source = (Audio_Source) { 0 };
-    impact_player = audio_player_get_one();
-    menu_music_player = audio_player_get_one();
-
-    // @audio_issue
-    // audio_player_set_source(impact_player, source, false);
-    // audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
-    audio_open_source_stream(&impact_source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
-
     Audio_Source source = { 0 };
-    audio_open_source_stream(&source, STR("res/audio/music/menu.wav"), get_heap_allocator());
-    // audio_open_source_stream(&source, STR("res/audio/music/loop.wav"), get_heap_allocator());
-    // @audio_issue works once with loop. secound time it stops
 
-    audio_player_set_source(menu_music_player, source, true);
-    audio_player_set_state(menu_music_player, AUDIO_PLAYER_STATE_PLAYING);
-    // @audio_issue
-    audio_player_set_looping(menu_music_player, true);
+    {
+        impact_player = audio_player_get_one();
+        impact_player->release_when_done = false;
+        impact_player->config.volume = 0.8;
 
-    impact_player->position = v3(0, 0, 0);
-    impact_player->release_when_done = false;
-    menu_music_player->position = v3(0, 0, 0);
-    menu_music_player->release_when_done = false;
+        audio_open_source_stream(&source, STR("res/audio/sfx/bullet_impact_01.wav"), get_heap_allocator());
+        audio_player_set_source(impact_player, source);
+        audio_player_set_state(impact_player, AUDIO_PLAYER_STATE_PLAYING);
+        audio_player_set_looping(impact_player, false);
+
+    }
+
+    {
+        shoot_player = audio_player_get_one();
+        shoot_player->release_when_done = false;
+        impact_player->config.volume = 0.9;
+
+        audio_open_source_stream(&source, STR("res/audio/sfx/bullet_shoot_01.wav"), get_heap_allocator());
+        audio_player_set_source(shoot_player, source);
+        audio_player_set_state(shoot_player, AUDIO_PLAYER_STATE_PLAYING);
+        audio_player_set_looping(shoot_player, false);
+    }
+
+    {
+        collect_player = audio_player_get_one();
+        collect_player->release_when_done = false;
+        collect_player->config.volume = 0.65;
+
+        audio_open_source_stream(&source, STR("res/audio/sfx/collect_sound_01.wav"), get_heap_allocator());
+        audio_player_set_source(collect_player, source);
+        audio_player_set_state(collect_player, AUDIO_PLAYER_STATE_PLAYING);
+        audio_player_set_looping(collect_player, false);
+    }
+
+    {
+        menu_music_player = audio_player_get_one();
+        menu_music_player->release_when_done = false;
+        menu_music_player->config.volume = 0.5;
+
+        audio_open_source_stream(&source, STR("res/audio/music/menu.wav"), get_heap_allocator());
+        audio_player_set_source(menu_music_player, source);
+        audio_player_set_state(menu_music_player, AUDIO_PLAYER_STATE_PLAYING);
+        audio_player_set_looping(menu_music_player, true);
+    }
 
     tiles = load_image_from_disk(STR("res/graphics/tiles/tilemap_world_01.png"), get_heap_allocator());
 

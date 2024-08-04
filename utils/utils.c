@@ -22,11 +22,6 @@ Vector2 screen_to_world(Vector2 mouse, Vector2 window, Draw_Frame frame) {
 	return (Vector2){ world_pos.x, world_pos.y };
 }
 
-int32_t absi(int32_t x) {
-    if (x < 0) return -x;
-    return x;
-}
-
 // https://github.com/bigrando420/game1/commit/89bbc0fe4d1de7376443ba9e3fd1bf2ab84fc48e 
 bool almost_equals(float a, float b, float epsilon) {
  return fabs(a - b) <= epsilon;
