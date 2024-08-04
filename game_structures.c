@@ -68,6 +68,7 @@ typedef struct sprite_t {
 
 typedef struct entity_t {
     bool is_valid;
+    bool is_destroyed;
 
     Vector2 position;
     Vector2 direction;

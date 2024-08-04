@@ -148,6 +148,15 @@ void entity_reset_all(void) {
     }
 }
 
+void clear_destroyed_entities(void) {
+    for (size_t i = 0; i < MAX_ENTITY_COUNT; i++) {
+        entity_t* ent = &(world->entities[i]);
+
+        if (ent->is_destroyed) 
+            memset(ent, 0, sizeof(entity_t));
+    }
+}
+
 void entity_clear_all_bullets(void) {
     for (u32 i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t* bullet = &(world->entities[i]);
@@ -267,7 +276,7 @@ void player_shoot(entity_t* player) {
 
 void update_player(void) {
     if (player_entity->healths < 0) {
-        player_entity->is_valid = false;
+        player_entity->is_destroyed = true;
         program_state = GAME_menu;
         return;
     }
@@ -305,13 +314,14 @@ void update_player(void) {
             player_entity->healths -= 1;
 
             entity_clear_all_bullets(); 
+
             player_entity->position = respawn_point;
             break;
         case ENTITY_item:
             collect_player->config.playback_speed = get_random_float64_in_range(0.95, 1.05);
             audio_player_set_progression_factor(collect_player, 0);
 
-            collision->is_valid = 0;
+            collision->is_destroyed = true;
             break;
 
         default:
@@ -463,7 +473,7 @@ void update_enemies(void) {
                 gold->position = v2_add(enemy->position, v2(x, y));
             }
 
-            enemy->is_valid = false;
+            enemy->is_destroyed = true;
             continue; 
         }
 
@@ -513,10 +523,10 @@ void update_bullets(void) {
         if (!(bullet->entity_type == ENTITY_bullet)) continue;
         
         if (bullet->timer > 10.0 ) {
-            bullet->is_valid = false;
+            bullet->is_destroyed = true;
             continue;
         }
-        if (!bullet->shoot_by->is_valid) {
+        if (bullet->shoot_by->is_destroyed) {
             entity_setup_item(bullet);
             item_setup_gold(bullet);
         }
@@ -534,7 +544,7 @@ void update_bullets(void) {
                 // this is because our upwards blocks are not full, 
                 // and bullet can and should move throught them
                 if (get_block_by_world_coord(position).type == BLOCK_wall) {
-                    bullet->is_valid = false;
+                    bullet->is_destroyed = true;
                 } else {
                     bullet->position = position;
                     bullet->timer += delta_time;
@@ -875,6 +885,8 @@ void update_game_scene(void) {
     update_enemies();
     update_items();
     update_bullets();
+
+    clear_destroyed_entities();
 
     if (is_key_just_pressed(KEY_ESCAPE)) {
         program_state = GAME_menu;
