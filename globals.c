@@ -24,3 +24,5 @@ struct {
 float64 now_time = 0;
 float64 flow_update_timer = 0;
 float64 delta_time = 0;
+
+float64 frametime_buffer[FPS_METER_OUTPUT_ID + 1];

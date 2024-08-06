@@ -9,30 +9,30 @@ typedef struct circle_t {
 // ---- functions ---- //
 inline circle_t circle(float32 radius, Vector2 position) { return (circle_t){ .radius = radius, .position = position }; }
 
-float32 v2_magn(Vector2 a) {
+inline float32 v2_magn(Vector2 a) {
     return sqrt(a.x * a.x + a.y * a.y);
 }
 
-float32 v2_sqr_magn(Vector2 a) {
+inline float32 v2_sqr_magn(Vector2 a) {
     return (a.x * a.x + a.y * a.y);
 }
 
-float32 v2_dist(Vector2 a, Vector2 b) {
+inline float32 v2_dist(Vector2 a, Vector2 b) {
     return v2_magn(v2_sub(a, b));
 }
 
-float32 v2_sqr_dist(Vector2 a, Vector2 b) {
+inline float32 v2_sqr_dist(Vector2 a, Vector2 b) {
     return v2_sqr_magn(v2_sub(a, b));
 }
 
-bool v2_dist_to_greater_than(Vector2 a, Vector2 b, float32 value) {
+inline bool v2_dist_to_greater_than(Vector2 a, Vector2 b, float32 value) {
     return v2_sqr_dist(a, b) > (value * value);
 }
 
-bool v2_magn_greater_than(Vector2 a, float32 value) {
+inline bool v2_magn_greater_than(Vector2 a, float32 value) {
     return v2_sqr_magn(a) > (value * value);
 }
 
-bool check_collision_circle_to_circle(circle_t a, circle_t b) {
+inline bool check_collision_circle_to_circle(circle_t a, circle_t b) {
     return v2_sqr_dist(a.position, b.position) < (a.radius * a.radius + b.radius * b.radius);
 }

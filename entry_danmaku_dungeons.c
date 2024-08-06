@@ -2,7 +2,9 @@
 #define MAX_FRAME_COUNT (1 << 16)
 #define CAMERA_SCALE 7.5f
 #define PLAYER_SPEED 4.5f
-#define MAX_DIST_TO_PLAYER 20.0f
+#define ENEMY_SPEED 0.25f
+#define MAX_DIST_TO_PLAYER 18.0f
+#define MAX_GRAB_DISTANCE 5.0f
 #define PLAYER_BULLET_SPEED 20.0f
 #define BULLET_01_SPEED 2.0f
 #define SHOOT_INTERVAL 0.1f
@@ -11,11 +13,14 @@
 #define MAP_WIDTH 100
 #define MAP_HEIGHT 100
 
-#define MAX_FLOW_DIST 10
+#define MAX_FLOW_DIST 15
 
 #define MONEY_MOVE_SPEED 10.0f
 // bosses are like 100 - 1000
 #define ENEMY_HEALTHS 20
+
+
+#define FPS_METER_OUTPUT_ID 64
 
 // MACRO POWER
 #define TILE_SIZE 18.0
@@ -207,12 +212,10 @@ bool check_collision_with_bullet(entity_t* bullet, entity_t* entity, circle_t bu
 }
 
 entity_t* check_collision_with_relevant_entities(entity_t* entity) {
-
     for (u32 i = 0; i < MAX_ENTITY_COUNT; i++) {
         entity_t* collide_with = &(world->entities[i]);
 
         if (!collide_with->is_valid) continue;
-
 
         if (collide_with->entity_type == ENTITY_bullet) {
             circle_t entity_circle = circle(entity->radius, entity->position);
@@ -408,16 +411,77 @@ void update_flow_map(void) {
         }
     }
 
+
+    // @todo optimize this cellular automata
     for (size_t steps = 0; steps < MAX_FLOW_DIST; steps++) {
-        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++)
+        for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
+            Vector2i pos = v2i(i % MAP_WIDTH, i / MAP_WIDTH);
+
+            //if (v2_sqr_dist(player_entity->position, v2_sub(v2i_to_v2(pos), v2(MAP_WIDTH / 2, MAP_HEIGHT / 2))) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER))
+            //    continue;
+
             if (world->world_map[i].type == BLOCK_floor)
                 update_flow_tile(i);
+        }
 
         for (size_t i = 0; i < (MAP_WIDTH * MAP_HEIGHT); i++) {
             world->flow_map[i] = world->temp_map[i];
             world->temp_map[i] = (flow_t){ 0 };
         }
     }
+}
+
+void update_enemy_shoot(entity_t* enemy) {
+    if ((enemy->timer + SHOOT_INTERVAL * 8) < now_time) {
+
+        enemy->timer = now_time;
+
+        size_t count = get_random_int_in_range(2, 4);
+
+        Vector2 position = v2_sub(enemy->position, player_entity->position);
+
+        float32 shoot_angle = PI32 / 4.0;  
+
+        for (size_t i = 0; i < count; i++) {
+            entity_t* bullet = entity_create();
+
+            if (bullet == 0) break;
+
+            entity_setup_bullet_01(bullet);
+            bullet->position = enemy->position;
+            bullet->shoot_by = enemy;
+
+            float32 normalized = (float32)i / (float32)(count - 1);
+            float32 angle = normalized * shoot_angle 
+                + (PI32 / 2) - (shoot_angle / 2)
+                + atan2f(position.y, position.x)
+                + PI32 / 2;
+
+            float32 y = sinf(angle);
+            float32 x = cosf(angle);
+
+            bullet->direction = v2(x, y);
+        }
+    }
+}
+
+void kill_enemy(entity_t* enemy) {
+    size_t count = get_random_int_in_range(2, 5);
+
+    for (size_t i = 0; i < count; i++) {
+        entity_t* gold = entity_create();
+        if (gold == 0) break;
+
+        entity_setup_item(gold);
+        item_setup_gold(gold);
+
+        float32 x = get_random_float32_in_range(-0.5, 0.5);
+        float32 y = get_random_float32_in_range(-0.5, 0.5);
+
+        gold->position = v2_add(enemy->position, v2(x, y));
+    }
+
+    enemy->is_destroyed = true;
 }
 
 void update_enemy_state(entity_t* enemy) {
@@ -427,26 +491,21 @@ void update_enemy_state(entity_t* enemy) {
 
     // movement
     {
-        // based on timer
-        // we need to add Vector2 dest to a enemy. 
-        // And 
+        enemy->destination = player_entity->position;
+        // - Check state
+        // > - Set destination
+        // > - Set attack / flee / shoot state
+
     }
 
 
-    entity_t* bullet_collision = check_collision_with_relevant_entities(enemy);
-
-    if (bullet_collision == 0) return;
-
-    impact_player->config.playback_speed = get_random_float64_in_range(0.85, 1.15);
-    audio_player_set_progression_factor(impact_player, 0);
-
-    enemy->healths -= 1;
-    bullet_collision->is_valid = false; 
 }
 
 void update_enemies(void) {
+    bool update = false;
     if ((flow_update_timer + FLOW_UPDATE_INTERVAL) <= now_time) {
         flow_update_timer = now_time;
+        update = true;
         update_flow_map();
     }
 
@@ -455,62 +514,40 @@ void update_enemies(void) {
         if (!enemy->is_valid) continue;
         if (enemy->entity_type != ENTITY_enemy) continue;
 
-        update_enemy_state(enemy);
-
-        if (enemy->healths < 0) {
-            size_t count = get_random_int_in_range(2, 5);
-
-            for (size_t i = 0; i < count; i++) {
-                entity_t* gold = entity_create();
-                if (gold == 0) break;
-
-                entity_setup_item(gold);
-                item_setup_gold(gold);
-
-                float32 x = get_random_float32_in_range(-0.5, 0.5);
-                float32 y = get_random_float32_in_range(-0.5, 0.5);
-
-                gold->position = v2_add(enemy->position, v2(x, y));
-            }
-
-            enemy->is_destroyed = true;
-            continue; 
+        if (v2_sqr_dist(player_entity->position, enemy->position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER ))
+            continue;
+        
+        if (update) {
+            update_enemy_state(enemy);
         }
+        // @cleanup @bug known issue that this func returns only one relevant collision
+        // if it doesnt update on every frame or frames are too long, you will get more
+        // pronounced bugs, that bullets come through enemy
+        entity_t *bullet_collision = check_collision_with_relevant_entities(enemy);
 
-        if ((enemy->timer + SHOOT_INTERVAL * 8) < now_time) {
-            if (v2_sqr_dist(player_entity->position, enemy->position) > (MAX_DIST_TO_PLAYER * MAX_DIST_TO_PLAYER))
+        if (bullet_collision != 0) {
+            impact_player->config.playback_speed = get_random_float64_in_range(0.85, 1.15);
+            audio_player_set_progression_factor(impact_player, 0);
+
+            enemy->healths -= 1;
+            bullet_collision->is_valid = false;
+
+            if (enemy->healths < 0) {
+                kill_enemy(enemy);
                 continue;
-
-            enemy->timer = now_time;
-
-            size_t count = get_random_int_in_range(2, 4);
-
-            Vector2 position = v2_sub(enemy->position, player_entity->position);
-
-            float32 shoot_angle = PI32 / 4.0;  
-
-            for (size_t i = 0; i < count; i++) {
-                entity_t* bullet = entity_create();
-
-                if (bullet == 0) break;
-
-                entity_setup_bullet_01(bullet);
-                bullet->position = enemy->position;
-                bullet->shoot_by = enemy;
-
-                float32 normalized = (float32)i / (float32)(count - 1);
-                float32 angle = normalized * shoot_angle 
-                              + (PI32 / 2) - (shoot_angle / 2)
-                              + atan2f(position.y, position.x)
-                              + PI32 / 2;
-
-                float32 y = sinf(angle);
-                float32 x = cosf(angle);
-
-                bullet->direction = v2(x, y);
             }
         }
-        // move & shoot here!
+
+        enemy->direction = v2_normalize(v2_sub(enemy->destination, enemy->position));
+
+        if (get_block_by_world_coord(v2(enemy->position.x + enemy->direction.x / 2, enemy->position.y)).type == BLOCK_wall)
+            enemy->direction.x = 0;
+        if (get_block_by_world_coord(v2(enemy->position.x, enemy->position.y + enemy->direction.y / 2)).type == BLOCK_wall)
+            enemy->direction.y = 0;
+
+        enemy->position = v2_add(enemy->position, v2_mulf(enemy->direction, ENEMY_SPEED * delta_time));
+
+        update_enemy_shoot(enemy);
     }
 }
 
@@ -566,7 +603,7 @@ void update_items(void) {
 
         Vector2 position = v2_sub(item->position, player_entity->position);
 
-        if (v2_magn_greater_than(position, MAX_DIST_TO_PLAYER / 5))
+        if (v2_magn_greater_than(position, MAX_GRAB_DISTANCE))
             continue;
 
         f32 angle = atan2f(position.y, position.x);
@@ -706,7 +743,7 @@ void draw_world_map(bool optimize) {
 
         Vector2 position = v2_sub(v2(x, y), v2(MAP_WIDTH / 2, MAP_HEIGHT / 2));
 
-        if (optimize && v2_dist_to_greater_than(player_entity->position, position, MAX_DIST_TO_PLAYER)) {
+        if (optimize && v2_dist_to_greater_than(player_entity->position, position, MAX_DIST_TO_PLAYER + 0.1)) {
             continue;
         }
 
@@ -788,7 +825,7 @@ void update_menu(void) {
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
     draw_text(font, STR("You're in game menu. \nPress SPACE to start\nPress ESC to exit"), 30, v2(0, -window.pixel_height / 2), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", frametime_buffer[FPS_METER_OUTPUT_ID]), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
 }
 
 void update_editor(void) {
@@ -867,7 +904,7 @@ void update_editor(void) {
     draw_frame.view = m4_make_scale(v3(1, 1, 1));
 
     draw_text(font, STR("editor. f8 regenerate map. f7 exit editor"), 30, v2(0, -30), v2(1, 1), COLOR_WHITE);
-    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", frametime_buffer[FPS_METER_OUTPUT_ID]), 30, v2(0, -60), v2(1, 1), COLOR_WHITE);
 }
 
 // @gameupdate
@@ -920,7 +957,7 @@ void update_game_scene(void) {
         }
     }
 
-    draw_text(font, tprintf("fps\t: %0.2f", 1.0 / delta_time), 30, v2(0, -30), v2(1, 1), COLOR_WHITE);
+    draw_text(font, tprintf("fps\t: %0.2f", frametime_buffer[FPS_METER_OUTPUT_ID]), 30, v2(0, -30), v2(1, 1), COLOR_WHITE);
 }
 
 void update_loading_screen(void) {
@@ -1018,12 +1055,27 @@ int entry(int argc, char **argv) {
 
     float64 prew_time = os_get_current_time_in_seconds();
 
+    size_t cntr = 0;
     while (!window.should_close) {
         reset_temporary_storage();
 
         now_time = os_get_current_time_in_seconds();
         delta_time = now_time - prew_time;
+        if ((cntr % FPS_METER_OUTPUT_ID) == 0) {
+            cntr = 0;
 
+            float64 buf = 100000;
+            for (size_t i = 0; i < FPS_METER_OUTPUT_ID; i++) {
+                if (buf > frametime_buffer[i]) {
+                    buf = frametime_buffer[i];
+                }
+            }
+
+            frametime_buffer[FPS_METER_OUTPUT_ID] = buf;
+        }
+
+        frametime_buffer[cntr++] = 1.0 / delta_time;
+        
         switch (program_state) {
             case GAME_init: 
                 update_loading_screen(); 

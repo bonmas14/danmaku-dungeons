@@ -72,6 +72,7 @@ typedef struct entity_t {
 
     Vector2 position;
     Vector2 direction;
+    Vector2 destination;
 
     entity_state_t state;
 

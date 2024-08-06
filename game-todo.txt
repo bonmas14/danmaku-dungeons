@@ -1,5 +1,9 @@
 
 
-* generation of enemies, based on level. not external
-* collisions with blocks!
++ generation of enemies, based on level. not external
++ collisions with blocks!
 
+- enemy movement
+- optimizing
+- FOV
+- different enemies
